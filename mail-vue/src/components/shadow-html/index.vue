@@ -1,124 +1,54 @@
 <template>
-  <div class="content-box" ref="contentBox">
-    <div ref="container" class="content-html"></div>
-  </div>
+  <iframe
+      ref="frame"
+      class="content-frame"
+      :title="$t('editorContent')"
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      referrerpolicy="no-referrer"
+      :srcdoc="documentHtml"
+      :style="{ height: height + 'px' }"
+      @load="observeContent"
+  ></iframe>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
+import { emailFrameDocument } from '@/utils/email-html.js'
 
 const props = defineProps({
   html: {
     type: String,
-    required: true
+    default: ''
   }
 })
 
-const container = ref(null)
-const contentBox = ref(null)
-let shadowRoot = null
+const frame = ref(null)
+const height = ref(160)
+const documentHtml = computed(() => emailFrameDocument(props.html))
+let observer
 
-function updateContent() {
-  if (!shadowRoot) return;
-
-  // 1. 提取 <body> 的 style 属性（如果存在）
-  const bodyStyleRegex = /<body[^>]*style="([^"]*)"[^>]*>/i;
-  const bodyStyleMatch = props.html.match(bodyStyleRegex);
-  const bodyStyle = bodyStyleMatch ? bodyStyleMatch[1] : '';
-
-  // 2. 移除 <body> 标签（保留内容）
-  const cleanedHtml = props.html.replace(/<\/?body[^>]*>/gi, '');
-
-  // 3. 将 body 的 style 应用到 .shadow-content
-  shadowRoot.innerHTML = `
-    <style>
-      :host {
-        all: initial;
-        width: 100%;
-        height: 100%;
-        font-family: -apple-system, Inter, BlinkMacSystemFont,
-                    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-        font-size: 14px;
-        line-height: 1.5;
-        color: #13181D;
-        word-break: break-word;
-      }
-
-      h1, h2, h3, h4 {
-          font-size: 18px;
-          font-weight: 700;
-      }
-
-      p {
-        margin: 0;
-      }
-
-      a {
-        text-decoration: none;
-        color: #0E70DF;
-      }
-
-      .shadow-content {
-        background: #FFFFFF;
-        width: fit-content;
-        height: fit-content;
-        min-width: 100%;
-        ${bodyStyle ? bodyStyle : ''} /* 注入 body 的 style */
-      }
-
-      img:not(table img) {
-        max-width: 100%;
-        height: auto !important;
-      }
-
-    </style>
-    <div class="shadow-content">
-      ${cleanedHtml}
-    </div>
-  `;
+function observeContent() {
+  observer?.disconnect()
+  const doc = frame.value?.contentDocument
+  if (!doc?.body) return
+  const resize = () => {
+    // Body height excludes the iframe viewport, so content can also shrink.
+    height.value = Math.min(20000, Math.max(80, Math.ceil(doc.body.getBoundingClientRect().height) + 24))
+  }
+  observer = new ResizeObserver(resize)
+  observer.observe(doc.body)
+  resize()
 }
 
-function autoScale() {
-  if (!shadowRoot || !contentBox.value) return
-
-  const parent = contentBox.value
-  const shadowContent = shadowRoot.querySelector('.shadow-content')
-
-  if (!shadowContent) return
-
-  const parentWidth = parent.offsetWidth
-  const childWidth = shadowContent.scrollWidth
-
-  if (childWidth === 0) return
-
-  const scale = parentWidth / childWidth
-
-  const hostElement = shadowRoot.host
-  hostElement.style.zoom = scale
-}
-
-onMounted(() => {
-  shadowRoot = container.value.attachShadow({ mode: 'open' })
-  updateContent()
-  autoScale()
-})
-
-watch(() => props.html, () => {
-  updateContent()
-  autoScale()
-})
+onBeforeUnmount(() => observer?.disconnect())
 </script>
 
 <style scoped>
-.content-box {
+.content-frame {
+  display: block;
   width: 100%;
-  height: 100%;
-  overflow: hidden;
-  font-family: -apple-system, Inter, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-}
-
-.content-html {
-  width: 100%;
-  height: 100%;
+  max-width: 100%;
+  border: 0;
+  background: #fff;
 }
 </style>

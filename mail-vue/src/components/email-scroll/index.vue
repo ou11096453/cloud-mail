@@ -5,25 +5,32 @@
           v-model="checkAll"
           :indeterminate="isIndeterminate"
           :disabled="!emailList.length || loading"
+          :aria-label="$t('selectAll')"
           @change="handleCheckAllChange"
       >
       </el-checkbox>
       <div class="header-left" :style="'padding-left:' + actionLeft">
 
         <slot name="first"></slot>
-        <Icon class="icon reload" icon="ion:reload" width="18" height="18" @click="refresh"/>
-        <Icon v-perm="'email:delete'" class="icon delete" icon="uiw:delete" width="16" height="16"
-              v-if="getSelectedMailsIds().length > 0"
-              @click="handleDelete"/>
-        <Icon v-perm="'email:delete'" class="icon delete" icon="fluent:mail-read-20-regular" width="21" height="21"
-              v-if="getSelectedMailsIds().length > 0 && showUnread"
-              @click="handleRead"/>
+        <button type="button" class="icon-button reload" :aria-label="$t('refresh')" :title="$t('refresh')" @click="refresh">
+          <Icon icon="ion:reload" width="18"/>
+        </button>
+        <button v-perm="'email:delete'" type="button" class="icon-button delete" v-if="checkedEmailCount > 0"
+                :aria-label="$t('delete')" :title="$t('delete')" @click="handleDelete">
+          <Icon icon="uiw:delete" width="16"/>
+        </button>
+        <button type="button" class="icon-button" v-if="checkedEmailCount > 0 && showUnread"
+                :aria-label="$t('markAsRead')" :title="$t('markAsRead')" @click="handleRead">
+          <Icon icon="fluent:mail-read-20-regular" width="21"/>
+        </button>
       </div>
 
       <div class="header-right">
         <span class="email-count" v-if="total">{{ $t('emailCount', {total: total}) }}</span>
-        <Icon v-if="showAccountIcon" class="more-icon icon" width="16" height="16" icon="akar-icons:dot-grid-fill"
-              @click="changeAccountShow"/>
+        <button v-if="showAccountIcon" type="button" class="icon-button" :aria-label="$t('emailAccount')" :title="$t('emailAccount')"
+                :aria-expanded="accountShow" @click="changeAccountShow">
+          <Icon width="16" icon="akar-icons:dot-grid-fill"/>
+        </button>
       </div>
     </div>
 
@@ -41,17 +48,22 @@
             <div :class="'email-row ' + props.type"
                  :data-checked="item.checked"
                  @click="jumpDetails(item)"
+                 tabindex="0"
+                 @keydown.enter.self="jumpDetails(item)"
                  v-if="!item.expand"
                  :key="item.emailId"
                  @contextmenu="handleContextmenu($event, item)"
                  :style="item.rightChecked ? 'background: #FDF6EC' : ''"
             >
               <el-checkbox :class=" props.type === 'all-email' ? 'all-email-checkbox' : 'checkbox'"
+                           :aria-label="$t('selectEmail') + ': ' + (item.subject || item.name)"
                            v-model="item.checked" @click.stop></el-checkbox>
-              <div @click.stop="starChange(item)" class="pc-star" v-if="showStar">
+              <button type="button" @click.stop="starChange(item)" class="icon-button pc-star" v-if="showStar"
+                      :aria-label="$t('star')" :title="$t('star')" :aria-pressed="!!item.isStar"
+                      :disabled="item.starPending || (!allowStar && !item.isStar)">
                 <Icon v-if="item.isStar" icon="fluent-color:star-16" width="20" height="20"/>
                 <Icon v-else icon="solar:star-line-duotone" width="18" height="18"/>
-              </div>
+              </button>
               <div v-if="!showStar"></div>
               <div class="title" :class="accountShow ? 'title-column' : 'title-column'">
 
@@ -73,7 +85,6 @@
                       <slot name="name" :email="item"> {{ item.name }}</slot>
                     </span>
                     <span>
-                      <Icon v-if="item.isStar" icon="fluent-color:star-16" width="18" height="18"/>
                     </span>
                   </span>
                   <span class="phone-time">{{ item.formatCreateTime }}</span>
@@ -139,6 +150,10 @@
                        :type="type"/>
       <div class="empty" v-if="noLoading && emailList.length === 0 && !loading">
         <el-empty :image-size="isMobile ? 120 : null" :description="$t('noMessagesFound')"/>
+      </div>
+      <div v-if="loadError && !loading" class="load-error" role="status">
+        <span>{{ $t('loadFailed') }}</span>
+        <el-button @click="getEmailList(emailList.length === 0)">{{ $t('retry') }}</el-button>
       </div>
     </div>
     <el-dropdown
@@ -240,12 +255,12 @@ import {computed, onActivated, reactive, ref, watch, nextTick, onMounted, onUnmo
 import {useEmailStore} from "@/store/email.js";
 import {useUiStore} from "@/store/ui.js";
 import {useSettingStore} from "@/store/setting.js";
-import {sleep} from "@/utils/time-utils.js"
 import {fromNow} from "@/utils/day.js";
 import {useI18n} from "vue-i18n";
 import {EmailUnreadEnum} from "@/enums/email-enum.js";
 import { UseVirtualList } from '@vueuse/components'
-import { useScroll } from '@vueuse/core'
+import { useScroll, useMediaQuery, useEventListener } from '@vueuse/core'
+import { emailHtmlToText } from '@/utils/email-html.js'
 
 const props = defineProps({
   getEmailList: Function,
@@ -316,7 +331,10 @@ let scrollTop = 0
 const latestEmail = ref(null)
 const scrollbarRef = ref(null)
 let reqLock = false
-let isMobile = ref(innerWidth < 1367)
+const isMobile = useMediaQuery('(max-width: 1366px)')
+const loadError = ref(false)
+let pendingRefresh = false
+let disposed = false
 let skeletonRows = 0
 const timePaddingRight = ref('');
 const keyCount = ref(0);
@@ -372,19 +390,17 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearInterval(timer)
+  disposed = true
 })
 
 getEmailList()
-
-window.onresize = () => {
-  isMobile.value = innerWidth < 1367
-}
 
 function onScroll(e) {
   scrollTop = e.target.scrollTop;
 }
 
-const { arrivedState } = useScroll(scrollbarRef, {
+const virtualContainer = computed(() => scrollbarRef.value?.$el)
+const { arrivedState } = useScroll(virtualContainer, {
   offset: { bottom: 1200 }
 })
 
@@ -410,8 +426,11 @@ watch(scrollbarRef, () => {
 })
 
 // 强制刷新 (itemHeight 更改后虚拟滚动列表不会自己更新)
-watch(itemHeight, () => {
+watch(itemHeight, async (height, previousHeight) => {
+  const index = Math.floor(scrollTop / previousHeight)
   keyCount.value ++
+  await nextTick()
+  scrollbarRef.value?.scrollTo(index)
 })
 
 watch(followLoading, (isFollowLoading) => {
@@ -422,7 +441,7 @@ watch(followLoading, (isFollowLoading) => {
     })
   } else {
     const index = expandList.findIndex(item => item.expand === 'loading')
-    expandList.splice(index, 1);
+    if (index >= 0) expandList.splice(index, 1);
   }
 });
 
@@ -434,7 +453,7 @@ watch(noLoading, (isNoLoading) => {
     })
   } else {
     const index = expandList.findIndex(item => item.expand === 'noMoreData')
-    expandList.splice(index, 1);
+    if (index >= 0) expandList.splice(index, 1);
   }
 })
 
@@ -449,10 +468,7 @@ watch(() => arrivedState.bottom, (isBottom) => {
 watch(
     () => emailList.map(item => item.checked),
     () => {
-      checkedEmailCount.value = emailList.length
-      if (emailList.length > 0) {
-        updateCheckStatus();
-      }
+      updateCheckStatus();
     },
     {deep: true}
 );
@@ -480,9 +496,9 @@ watch(() => emailStore.addStarEmailId, () => {
   })
 })
 
-window.addEventListener('wheel', (event) => {
+useEventListener(window, 'wheel', () => {
   if (dropdownShow.value) {
-    dropdownRef.value.handleClose();
+    dropdownRef.value?.handleClose();
   }
 })
 
@@ -553,18 +569,7 @@ const accountShow = computed(() => {
 
 function htmlToText(email) {
   if (email.content) {
-
-    const tempDiv = document.createElement('div');
-
-    tempDiv.innerHTML = email.content.replace(
-        /<(img|iframe|object|embed|video|audio|source|link)[^>]*>/gi, ''
-    );
-
-    const scriptsAndStyles = tempDiv.querySelectorAll('script, style, title');
-    scriptsAndStyles.forEach(el => el.remove());
-    let text = tempDiv.textContent || tempDiv.innerText || '';
-    text = text.replace(/\s+/g, ' ').trim();
-    return cleanSpace(text)
+    return cleanSpace(emailHtmlToText(email.content))
   }
 
   if (email.text) {
@@ -582,30 +587,21 @@ function cleanSpace(text) {
       .trim();
 }
 
-function starChange(email) {
-
-  if (!email.isStar) {
-
-    if (!props.allowStar) return;
-
-    email.isStar = 1;
-    props.starAdd(email.emailId).then(() => {
-      email.isStar = 1;
-      props.starSuccess(email)
-    }).catch(e => {
-      console.error(e)
-      email.isStar = 0
-    })
-  } else {
-
-    email.isStar = 0;
-    props.starCancel(email.emailId).then(() => {
-      email.isStar = 0;
-      props.cancelSuccess?.(email)
-    }).catch(e => {
-      console.error(e)
-      email.isStar = 1;
-    })
+async function starChange(email) {
+  if (email.starPending || (!email.isStar && !props.allowStar)) return
+  const previous = email.isStar
+  const request = previous ? props.starCancel : props.starAdd
+  if (!request) return
+  email.starPending = true
+  email.isStar = previous ? 0 : 1
+  try {
+    await request(email.emailId)
+    if (previous) props.cancelSuccess?.(email)
+    else props.starSuccess?.(email)
+  } catch {
+    email.isStar = previous
+  } finally {
+    email.starPending = false
   }
 }
 
@@ -613,15 +609,19 @@ function changeAccountShow() {
   uiStore.accountShow = !uiStore.accountShow;
 }
 
-const handleRead = () => {
+const handleRead = async () => {
   const emailIds = getSelectedMailsIds();
-  props.emailRead(emailIds);
-  localRead(emailIds);
+  try {
+    await props.emailRead(emailIds);
+    localRead(emailIds);
+  } catch {}
 }
 
-function emailRead(emailId) {
-  props.emailRead([emailId])
-  localRead([emailId]);
+async function emailRead(emailId) {
+  try {
+    await props.emailRead([emailId])
+    localRead([emailId]);
+  } catch {}
 }
 
 function localRead(emailIds) {
@@ -711,6 +711,7 @@ function handleDelete() {
 }
 
 function deleteEmail(emailIds) {
+  const previousCount = emailList.length
   emailIds.forEach(emailId => {
     emailList.forEach((item, index) => {
       if (emailId === item.emailId) {
@@ -718,6 +719,7 @@ function deleteEmail(emailIds) {
       }
     })
   })
+  total.value = Math.max(0, total.value - (previousCount - emailList.length))
   if (emailList.length < queryParam.size && !noLoading.value) {
     getEmailList()
   }
@@ -732,7 +734,7 @@ function addItem(email) {
   }
 
   email.formatText = htmlToText(email);
-  email.formatCreateTime = fromNow(email.formatCreateTime);
+  email.formatCreateTime = fromNow(email.createTime);
 
   if (props.timeSort) {
     if (noLoading.value) {
@@ -740,7 +742,7 @@ function addItem(email) {
       emailList.push(email);
     }
 
-    if (email.emailId > latestEmail.value?.emailId) {
+    if (!latestEmail.value || email.emailId > latestEmail.value.emailId) {
       latestEmail.value = email
     }
 
@@ -761,7 +763,7 @@ function addItem(email) {
     }
   }
 
-  if (email.emailId > latestEmail.value?.emailId) {
+  if (!latestEmail.value || email.emailId > latestEmail.value.emailId) {
     latestEmail.value = email
   }
 
@@ -786,7 +788,7 @@ function getSelectedDraftsIds() {
 function updateCheckStatus() {
   const checkedCount = emailList.filter(item => item.checked).length;
   checkedEmailCount.value = checkedCount;
-  checkAll.value = checkedCount === emailList.length;
+  checkAll.value = emailList.length > 0 && checkedCount === emailList.length;
   isIndeterminate.value = checkedCount > 0 && checkedCount < emailList.length;
 }
 
@@ -807,13 +809,17 @@ function jumpDetails(email) {
 }
 
 
-function getEmailList(refresh = false) {
+async function getEmailList(refresh = false) {
 
-  if (reqLock) return;
+  if (reqLock) {
+    pendingRefresh ||= refresh
+    return
+  }
 
   let emailId = emailList.length > 0 ? emailList.at(-1).emailId : 0;
 
   reqLock = true
+  loadError.value = false
 
   if (!refresh) {
 
@@ -824,6 +830,9 @@ function getEmailList(refresh = false) {
 
   } else {
     getSkeletonRows()
+    emailList.length = 0
+    latestEmail.value = null
+    total.value = 0
     emailId = 0
     loading.value = true
     scrollTop = 0
@@ -834,14 +843,9 @@ function getEmailList(refresh = false) {
   } else {
     followLoading.value = !refresh;
   }
-  let start = Date.now();
-
-  props.getEmailList(emailId, queryParam.size).then(async data => {
-    let end = Date.now();
-    let duration = end - start;
-    if (duration < 300 && !emailId) {
-        await sleep(300 - duration)
-    }
+  try {
+    const data = await props.getEmailList(emailId, queryParam.size)
+    if (disposed || pendingRefresh) return
     firstLoad.value = false
 
     let list = data.list.map(item => ({
@@ -858,16 +862,22 @@ function getEmailList(refresh = false) {
 
     handleList(list);
     emailList.push(...list);
-    if (refresh) scrollbarRef.value?.setScrollTop(0);
-
-    noLoading.value = data.list.length < queryParam.size;
-    followLoading.value = data.list.length >= queryParam.size;
-
-    total.value = data.total;
-  }).finally(() => {
+    noLoading.value = props.type === 'draft' || data.list.length < queryParam.size;
+    total.value = data.total ?? emailList.length;
+  } catch {
+    loadError.value = true
+    firstLoad.value = false
+  } finally {
     loading.value = false
+    followLoading.value = false
     reqLock = false
-  })
+    await nextTick()
+    if (refresh) scrollbarRef.value?.scrollTo(0)
+    if (pendingRefresh && !disposed) {
+      pendingRefresh = false
+      getEmailList(true)
+    }
+  }
 }
 
 function handleList(list) {
@@ -889,15 +899,12 @@ function handleList(list) {
     if (email.isDel) {
       email.isDelContent = t('selectDeleted');
     }
-    email.statusIcon = statusIconMap[email.status];
+    email.statusIcon = statusIconMap[email.status] || { icon: 'mdi:email-outline', content: t('message') };
   })
 }
 
 function refresh() {
   emit('refresh-before')
-  if (props.skeleton) {
-    scrollbarRef.value.setScrollTop(0)
-  }
   refreshList()
 }
 
@@ -916,7 +923,9 @@ function loadData() {
 
 .email-container {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
   padding: 0;
   font-size: 14px;
   color: var(--el-text-color-primary);
@@ -925,13 +934,13 @@ function loadData() {
 }
 
 .scroll {
+  position: relative;
+  min-height: 0;
   margin: 0;
   height: 100%;
   overflow: hidden;
 
-  .virtual {
-    will-change: scroll-position;
-  }
+  .virtual { overscroll-behavior: contain; }
 
   .empty {
     display: flex;
@@ -989,7 +998,6 @@ function loadData() {
   cursor: pointer;
   align-items: center;
   position: relative;
-  transition: background 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
   height: 48px;
   @media (max-width: 1366px) {
     height: 83px;
@@ -1043,15 +1051,17 @@ function loadData() {
 
   .checkbox {
     display: flex;
-    padding-left: 15px;
-    padding-right: 20px;
+    flex: 0 0 44px;
+    padding: 0;
+    height: 44px;
     justify-content: center;
   }
 
   .all-email-checkbox {
     display: flex;
-    padding-left: 15px;
-    padding-right: 20px;
+    flex: 0 0 44px;
+    padding: 0;
+    height: 44px;
     justify-content: center;
     @media (min-width: 1367px) {
       justify-content: start;
@@ -1070,8 +1080,9 @@ function loadData() {
 
   .title {
     flex: 1;
+    min-width: 0;
     display: grid;
-    grid-template-columns: 240px 1fr;
+    grid-template-columns: minmax(0, 240px) minmax(0, 1fr);
     @media (max-width: 1366px) {
       padding-right: 15px;
     }
@@ -1083,7 +1094,7 @@ function loadData() {
     .email-sender {
       color: var(--el-text-color-primary);
       display: grid;
-      grid-template-columns: auto 1fr auto;
+      grid-template-columns: auto minmax(0, 1fr) auto;
 
       .email-status {
         display: flex;
@@ -1162,7 +1173,7 @@ function loadData() {
 
     .email-text {
       display: grid;
-      grid-template-columns: auto 1fr;
+      grid-template-columns: auto minmax(0, 1fr);
       @media (max-width: 1366px) {
         grid-template-columns: 1fr;
       }
@@ -1249,12 +1260,15 @@ function loadData() {
 
 .pc-star {
   display: flex;
-  width: 40px;
+  flex: 0 0 36px;
+  width: 36px;
+  padding: 0;
 }
 
 @media (max-width: 1366px) {
   .pc-star {
-    display: none;
+    flex-basis: 44px;
+    width: 44px;
   }
   .phone-star {
     display: block;
@@ -1277,10 +1291,10 @@ function loadData() {
 
 .header-actions {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 15px;
-  padding: 3px 15px;
+  gap: 4px;
+  padding: 3px 8px;
   box-shadow: var(--header-actions-border);
 
   .header-left {
@@ -1288,7 +1302,8 @@ function loadData() {
     flex-wrap: wrap;
     align-items: center;
     position: relative;
-    column-gap: 20px;
+    min-width: 0;
+    column-gap: 4px;
     row-gap: 8px;
     padding-left: 2px;
     color: var(--el-text-color-primary);;
@@ -1297,13 +1312,14 @@ function loadData() {
   .header-right {
     display: grid;
     grid-template-columns: auto auto;
-    align-items: start;
+    align-items: center;
     height: 100%;
     color: var(--el-text-color-primary);;
 
     .email-count {
       white-space: nowrap;
-      margin-top: 6px;
+      font-size: 12px;
+      @media (max-width: 480px) { display: none; }
     }
   }
 
@@ -1316,6 +1332,19 @@ function loadData() {
     margin-top: 8px;
     margin-left: 15px;
   }
+}
+
+.load-error {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: var(--el-bg-color);
 }
 
 .del-status {

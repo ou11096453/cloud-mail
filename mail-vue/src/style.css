@@ -60,7 +60,82 @@ button, input, select, textarea {
 }
 
 .el-message {
-    white-space: nowrap !important;
+    max-width: calc(100vw - 24px);
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+}
+
+:focus-visible {
+    outline: 2px solid var(--el-color-primary);
+    outline-offset: 3px;
+}
+
+.icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    color: inherit;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.icon-button:hover {
+    background: var(--base-fill);
+}
+
+.icon-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.el-dialog,
+.el-message-box {
+    max-width: calc(100vw - 24px);
+}
+
+@media (max-width: 767px), (pointer: coarse) {
+    .icon-button {
+        width: 44px;
+        height: 44px;
+    }
+    .el-input .el-input__inner,
+    .el-textarea .el-textarea__inner,
+    .el-input-tag .el-input-tag__input,
+    .el-select .el-select__input {
+        font-size: 16px;
+    }
+    .el-button {
+        min-height: 44px;
+    }
+    .el-menu-item {
+        min-height: 44px;
+    }
+    .el-dialog {
+        max-height: calc(100dvh - 24px);
+        overflow-y: auto;
+    }
+    .el-picker-panel {
+        max-width: calc(100vw - 24px);
+        overflow-x: auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
+    }
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+        animation: none !important;
+        clip-path: none !important;
+    }
 }
 
 .message-bottom {
@@ -126,7 +201,7 @@ button, input, select, textarea {
     --aside-right-border: 3px 0 5px rgba(0, 21, 41, .35);
     --choose-account-background: var(--el-color-primary-light-8);
     --el-text-color-regular: var(--el-text-color-primary);
-    --email-scroll-content-color: rgba(25, 41, 59, 0.4);
+    --email-scroll-content-color: rgba(25, 41, 59, 0.72);
     --email-hover-background: #F2F6FC;
     --login-border: none;
     --form-desc-color: #71717a;
@@ -155,7 +230,7 @@ button, input, select, textarea {
     --light-border-color: #414243;
     --aside-right-border: 3px 0 5px #0A0A0A;
     --choose-account-background: #39393A;
-    --email-scroll-content-color: rgba(255, 255, 255, 0.3);
+    --email-scroll-content-color: rgba(255, 255, 255, 0.62);
     --email-hover-background: #1D1E1F;
     --login-border: none;
     --form-desc-color: #8D9095;
@@ -209,4 +284,21 @@ html[data-theme-to="light"]::view-transition-old(root) {
 @keyframes vt-radial-out {
     from { clip-path: circle(var(--vt-end-radius, 0px) at var(--vt-x) var(--vt-y)); }
     to   { clip-path: circle(0px at var(--vt-x) var(--vt-y)); }
+}
+:root { letter-spacing: 0; }
+
+.startup-error {
+  display: flex;
+  min-height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 24px;
+  box-sizing: border-box;
+}
+.startup-error button {
+  font: inherit;
+  min-height: 44px;
+  padding: 8px 20px;
+  cursor: pointer;
 }

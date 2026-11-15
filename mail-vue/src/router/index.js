@@ -110,7 +110,7 @@ router.beforeEach((to, from, next) => {
     }
 
     if (token && to.name === 'login') {
-        return next(from.path)
+        return next('/inbox')
     }
 
     next()
@@ -126,21 +126,17 @@ function loadBackground(next) {
         const src = cvtR2Url(settingStore.settings.background);
 
         const img = new Image();
+        let completed = false;
+        const finish = () => {
+            if (completed) return;
+            completed = true;
+            clearTimeout(timeout);
+            img.onload = img.onerror = null;
+            next()
+        };
+        const timeout = setTimeout(finish, 3000)
+        img.onload = img.onerror = finish;
         img.src = src;
-
-        img.onload = () => {
-            next()
-        };
-
-        img.onerror = () => {
-            console.warn("背景图片加载失败:", img.src);
-            next()
-        };
-
-        setTimeout(() => {
-            console.warn("背景加载超时，已放行");
-            next()
-        }, 3000)
 
     } else {
         next()

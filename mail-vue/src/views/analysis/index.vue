@@ -120,8 +120,9 @@
 
 <script setup>
 import {Icon} from "@iconify/vue";
-import {useTransition} from "@vueuse/core";
-import {defineOptions, onActivated, onDeactivated, onMounted, reactive, ref, watch, computed} from "vue";
+import {useTransition, useEventListener, usePreferredReducedMotion} from "@vueuse/core";
+import {defineOptions, onActivated, onDeactivated, onMounted, onBeforeUnmount, nextTick, reactive, ref, watch, computed} from "vue";
+import {escapeHtml} from '@/utils/email-html.js';
 import echarts from "@/echarts/index.js";
 import dayjs from "dayjs";
 import {analysisEcharts} from "@/request/analysis.js";
@@ -157,20 +158,26 @@ const numberCount = reactive({
 })
 
 
+const reducedMotion = usePreferredReducedMotion()
+const disableMotion = computed(() => reducedMotion.value === 'reduce')
 const receiveData = useTransition(receiveTotal, {
   duration: 1500,
+  disabled: disableMotion,
 })
 
 const sendData = useTransition(sendTotal, {
   duration: 1500,
+  disabled: disableMotion,
 })
 
 const accountData = useTransition(accountTotal, {
   duration: 1500,
+  disabled: disableMotion,
 })
 
 const userData = useTransition(userTotal, {
   duration: 1500,
+  disabled: disableMotion,
 })
 
 const senderData = ref(null)
@@ -206,11 +213,14 @@ let first = true
 let boxKey = ref(0)
 let senderPieLeft = window.innerWidth < 500 ? `${window.innerWidth - 110}` : '72%'
 let analysisDark = uiStore.dark
+let disposed = false
+let renderGeneration = 0
 
 onMounted(() => {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   analysisEcharts(timeZone).then(data => {
+    if (disposed) return
     receiveTotal.value = data.numberCount.receiveTotal
     sendTotal.value = data.numberCount.sendTotal
     accountTotal.value = data.numberCount.accountTotal
@@ -272,26 +282,37 @@ onDeactivated(() => {
   leaveWidth = window.innerWidth
 })
 
-window.onresize = () => {
+useEventListener(window, 'resize', () => {
   setStyle()
   widthChange()
-}
+})
 
-watch(() => uiStore.dark, () => {
+onBeforeUnmount(() => {
+  disposed = true
+  widthChange.cancel()
+  senderPie?.dispose()
+  increaseLine?.dispose()
+  emailColumn?.dispose()
+  sendGauge?.dispose()
+})
+
+watch(() => [uiStore.dark, disableMotion.value], () => {
   if (route.name !== 'analysis') return
   analysisDark = uiStore.dark
   initPicture()
 })
 
-function initPicture() {
-  if (route.name !== 'analysis') return
+async function initPicture() {
+  if (disposed || analysisLoading.value || route.name !== 'analysis') return
+  const current = ++renderGeneration
   boxKey.value++
-  setTimeout(() => {
+  await nextTick()
+  if (!disposed && current === renderGeneration && route.name === 'analysis') {
     createSenderPie()
     createIncreaseLine()
     createEmailColumnChart();
     createSendGauge();
-  })
+  }
 }
 
 function setStyle() {
@@ -324,6 +345,7 @@ function createSenderPie() {
   }
   senderPie = echarts.init(document.querySelector(".sender-pie"))
   let option = {
+    animation: !disableMotion.value,
     tooltip: {
       trigger: 'item',
       textStyle: {
@@ -331,7 +353,7 @@ function createSenderPie() {
       },
       backgroundColor: topic.value.background,
       formatter: params => {
-        return `${params.marker} ${params.name}： ${params.value} (${params.percent}%)`;
+        return `${params.marker} ${escapeHtml(params.name)}： ${params.value} (${params.percent}%)`;
       }
     },
     legend: {
@@ -392,6 +414,7 @@ function createIncreaseLine() {
   increaseLine = echarts.init(document.querySelector(".increase-line"))
 
   let option = {
+    animation: !disableMotion.value,
     tooltip: {
       trigger: 'axis', // 设置触发方式为 'axis'，在坐标轴上显示信息
       axisPointer: {
@@ -549,6 +572,7 @@ function createEmailColumnChart() {
   emailColumn = echarts.init(document.querySelector(".email-column"));
 
   const option = {
+    animation: !disableMotion.value,
     tooltip: {
       textStyle: {
         color: topic.value.color
@@ -656,6 +680,7 @@ function createSendGauge() {
   }
   sendGauge = echarts.init(document.querySelector(".send-count"));
   let option = {
+    animation: !disableMotion.value,
     tooltip: {
       textStyle: {
         color: topic.value.color

@@ -26,12 +26,7 @@ export async function init() {
     let setting = null;
 
     if (token) {
-        const userPromise = loginUserInfo().catch(e => {
-            console.error(e);
-            return null;
-        });
-
-        const [s, user] = await Promise.all([websiteConfig(), userPromise]);
+        const [s, user] = await Promise.all([websiteConfig(), loginUserInfo()]);
         setting = s;
         settingStore.settings = setting;
         settingStore.domainList = setting.domainList;

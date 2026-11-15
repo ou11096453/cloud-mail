@@ -1,16 +1,24 @@
 <template>
-  <div class="box">
+  <div class="box" v-if="email">
     <div class="header-actions">
-      <Icon class="icon" icon="material-symbols-light:arrow-back-ios-new" width="20" height="20" @click="handleBack"/>
-      <Icon v-perm="'email:delete'" class="icon" icon="uiw:delete" width="16" height="16" @click="handleDelete"/>
-      <span class="star" v-if="emailStore.contentData.showStar">
-        <Icon class="icon" @click="changeStar" v-if="email.isStar" icon="fluent-color:star-16" width="20" height="20"/>
-        <Icon class="icon" @click="changeStar" v-else icon="solar:star-line-duotone" width="18" height="18"/>
-      </span>
-      <Icon class="icon" v-if="emailStore.contentData.showReply" v-perm="'email:send'"  @click="openReply" icon="la:reply" width="21" height="21" />
-      <Icon class="icon" v-if="emailStore.contentData.showReply" v-perm="'email:send'"  @click="openForward" icon="iconoir:arrow-up-right" width="20" height="20" />
+      <button type="button" class="icon-button" :aria-label="$t('back')" :title="$t('back')" @click="handleBack">
+        <Icon icon="material-symbols-light:arrow-back-ios-new" width="20"/>
+      </button>
+      <button v-perm="'email:delete'" type="button" class="icon-button" :aria-label="$t('delete')" :title="$t('delete')" @click="handleDelete">
+        <Icon icon="uiw:delete" width="16"/>
+      </button>
+      <button type="button" class="icon-button" v-if="emailStore.contentData.showStar" :aria-label="$t('star')" :title="$t('star')"
+              :aria-pressed="!!email.isStar" :disabled="starPending" @click="changeStar">
+        <Icon v-if="email.isStar" icon="fluent-color:star-16" width="20"/>
+        <Icon v-else icon="solar:star-line-duotone" width="18"/>
+      </button>
+      <button type="button" class="icon-button" v-if="emailStore.contentData.showReply" v-perm="'email:send'" :aria-label="$t('reply')" :title="$t('reply')" @click="openReply">
+        <Icon icon="la:reply" width="21"/>
+      </button>
+      <button type="button" class="icon-button" v-if="emailStore.contentData.showReply" v-perm="'email:send'" :aria-label="$t('forward')" :title="$t('forward')" @click="openForward">
+        <Icon icon="iconoir:arrow-up-right" width="20"/>
+      </button>
     </div>
-    <div></div>
     <el-scrollbar class="scrollbar">
       <div class="container">
         <div class="email-title">
@@ -54,8 +62,11 @@
                 </div>
                 <div class="att-size">{{ formatBytes(att.size) }}</div>
                 <div class="opt-icon att-icon">
-                  <Icon v-if="isImage(att.filename)" icon="hugeicons:view" width="22" height="22" @click="showImage(att.key)"/>
-                  <a :href="cvtR2Url(att.key)" download>
+                  <button v-if="isImage(att.filename)" type="button" class="icon-button" :aria-label="$t('preview') + ': ' + att.filename"
+                          :title="$t('preview')" @click="showImage(att.key)">
+                    <Icon icon="hugeicons:view" width="22"/>
+                  </button>
+                  <a class="icon-button" :href="cvtR2Url(att.key)" :aria-label="$t('download') + ': ' + att.filename" :title="$t('download')" download>
                     <Icon icon="system-uicons:push-down" width="22" height="22"/>
                   </a>
                 </div>
@@ -99,6 +110,9 @@ const accountStore = useAccountStore();
 const emailStore = useEmailStore();
 const router = useRouter()
 const email = emailStore.contentData.email
+if (!email) router.replace('/inbox')
+else if (!Array.isArray(email.attList)) email.attList = []
+const starPending = ref(false)
 const showPreview = ref(false)
 const srcList = reactive([])
 
@@ -108,9 +122,10 @@ watch(() => accountStore.currentAccountId, () => {
 })
 
 onMounted(() => {
-  if (emailStore.contentData.showUnread && email.unread === EmailUnreadEnum.UNREAD) {
-    email.unread = EmailUnreadEnum.READ;
-    emailRead([email.emailId]);
+  if (email && emailStore.contentData.showUnread && email.unread === EmailUnreadEnum.UNREAD) {
+    emailRead([email.emailId]).then(() => {
+      email.unread = EmailUnreadEnum.READ;
+    }).catch(() => {})
   }
 })
 
@@ -127,7 +142,8 @@ function openForward() {
 }
 
 function toMessage(message) {
-  return  message ? JSON.parse(message).message : '';
+  try { return message ? JSON.parse(message).message : '' }
+  catch { return message || '' }
 }
 
 function formatImage(content) {
@@ -149,11 +165,15 @@ function isImage(filename) {
 }
 
 function formateReceive(recipient) {
-  recipient = JSON.parse(recipient)
-  return recipient.map(item => item.address).join(', ')
+  try {
+    const list = typeof recipient === 'string' ? JSON.parse(recipient) : recipient
+    return Array.isArray(list) ? list.map(item => item.address).join(', ') : ''
+  } catch { return recipient || '' }
 }
 
 function changeStar() {
+  if (starPending.value) return
+  starPending.value = true
   if (email.isStar) {
     email.isStar = 0;
     starCancel(email.emailId).then(() => {
@@ -164,7 +184,7 @@ function changeStar() {
     }).catch((e) => {
       console.error(e)
       email.isStar = 1;
-    })
+    }).finally(() => { starPending.value = false })
   } else {
     email.isStar = 1;
     starAdd(email.emailId).then(() => {
@@ -175,12 +195,13 @@ function changeStar() {
     }).catch((e) => {
       console.error(e)
       email.isStar = 0;
-    })
+    }).finally(() => { starPending.value = false })
   }
 }
 
 const handleBack = () => {
-  router.back()
+  if (window.history.state?.back) router.back()
+  else router.replace('/inbox')
 }
 
 const handleDelete = () => {
@@ -188,43 +209,35 @@ const handleDelete = () => {
     confirmButtonText: t('confirm'),
     cancelButtonText: t('cancel'),
     type: 'warning'
-  }).then(() => {
-    if (emailStore.contentData.delType === 'logic') {
-      emailDelete(email.emailId).then(() => {
-        ElMessage({
-          message: t('delSuccessMsg'),
-          type: 'success',
-          plain: true,
-        })
-        emailStore.deleteIds = [email.emailId]
+  }).then(async () => {
+    try {
+      const remove = emailStore.contentData.delType === 'logic' ? emailDelete : allEmailDelete
+      await remove(email.emailId)
+      ElMessage({
+        message: t('delSuccessMsg'),
+        type: 'success',
+        plain: true,
       })
-    } else  {
-
-      allEmailDelete(email.emailId).then(() => {
-        ElMessage({
-          message: t('delSuccessMsg'),
-          type: 'success',
-          plain: true,
-        })
-        emailStore.deleteIds = [email.emailId]
-      })
-    }
-
-    router.back()
-  })
+      emailStore.deleteIds = [email.emailId]
+      handleBack()
+    } catch {}
+  }).catch(() => {})
 }
 </script>
 <style scoped lang="scss">
 .box {
   height: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
 
 .header-actions {
-  padding: 9px 15px;
+  padding: 3px 8px;
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 4px;
   box-shadow: var(--header-actions-border);
   font-size: 18px;
   .star {
@@ -240,7 +253,8 @@ const handleDelete = () => {
 
 
 .scrollbar {
-  height: calc(100% - 38px);
+  height: 100%;
+  min-height: 0;
   width: 100%;
 }
 
@@ -258,6 +272,7 @@ const handleDelete = () => {
     font-size: 20px;
     font-weight: bold;
     margin-bottom: 10px;
+    overflow-wrap: anywhere;
   }
 
   .htm-scrollbar {
@@ -274,9 +289,11 @@ const handleDelete = () => {
       padding: 14px;
       border-radius: 6px;
       width: fit-content;
+      max-width: 100%;
+      box-sizing: border-box;
       .att-box {
-        min-width: min(410px,calc(100vw - 60px));
-        max-width: 600px;
+        width: min(600px, 100%);
+        min-width: 0;
         display: grid;
         gap: 12px;
         grid-template-rows: 1fr;
@@ -301,7 +318,12 @@ const handleDelete = () => {
         border-radius: 4px;
         align-self: start;
         display: grid;
-        grid-template-columns: auto 1fr auto auto;
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
+        @media (max-width: 480px) {
+          grid-template-columns: auto minmax(0, 1fr) auto;
+          .att-size { grid-column: 2; font-size: 12px; }
+          .opt-icon { grid-column: 3; grid-row: 1 / span 2; padding-left: 0; gap: 0; }
+        }
         .att-icon {
           display: grid;
         }
@@ -365,6 +387,8 @@ const handleDelete = () => {
         margin-bottom: 6px;
 
         .send-name {
+          min-width: 0;
+          overflow-wrap: anywhere;
           color: var(--regular-text-color);
           display: flex;
           flex-wrap: wrap;
@@ -400,17 +424,6 @@ const handleDelete = () => {
       }
     }
   }
-}
-
-.shadow-html::after  {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--message-block-color); /* 半透明黑色蒙层 */
-  pointer-events: none; /* 不影响点击 */
 }
 
 .email-text {

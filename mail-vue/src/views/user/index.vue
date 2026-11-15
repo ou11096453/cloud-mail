@@ -366,6 +366,7 @@
 
 <script setup>
 import {defineOptions, h, reactive, ref, watch} from 'vue'
+import {useEventListener} from '@vueuse/core'
 import {
   userList,
   userDelete,
@@ -1016,9 +1017,9 @@ function getUserList(loading = true) {
   })
 }
 
-window.onresize = () => {
+useEventListener(window, 'resize', () => {
   adjustWidth()
-};
+});
 
 adjustWidth()
 

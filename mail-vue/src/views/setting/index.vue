@@ -7,15 +7,15 @@
         <div>
           <span v-if="setNameShow" class="edit-name-input">
             <el-input v-model="accountName"  ></el-input>
-            <span class="edit-name" @click="setName">
+            <button type="button" class="edit-name" @click="setName">
              {{$t('save')}}
-            </span>
+            </button>
           </span>
           <span v-else class="user-name">
             <span >{{ userStore.user.name }}</span>
-            <span class="edit-name" @click="showSetName">
+            <button type="button" class="edit-name" @click="showSetName">
              {{$t('change')}}
-            </span>
+            </button>
           </span>
         </div>
       </div>
@@ -69,8 +69,9 @@ import {accountSetName} from "@/request/account.js";
 import {useAccountStore} from "@/store/account.js";
 import {useI18n} from "vue-i18n";
 import {useSettingStore} from "@/store/setting.js";
+import {setExtend} from '@/utils/day.js';
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const accountStore = useAccountStore()
 const settingStore = useSettingStore()
 const userStore = useUserStore();
@@ -101,6 +102,7 @@ function setName() {
 
   setNameShow.value = false
   let name = accountName.value
+  const previousName = userStore.user.name
 
   if (name === userStore.user.name) {
     return
@@ -118,19 +120,15 @@ function setName() {
     accountStore.changeUserAccountName = name
 
   }).catch(() => {
-    userStore.user.name = name
+    userStore.user.name = previousName
   })
 }
 
 function changeLang(lang) {
-  let setting = {}
-  try {
-    setting = JSON.parse(localStorage.getItem('setting') || '{}')
-  } catch (e) {
-    setting = {}
-  }
-  localStorage.setItem('setting', JSON.stringify({...setting, lang}))
-  window.location.reload()
+  settingStore.lang = lang
+  langSelect.value = lang
+  locale.value = lang
+  setExtend(lang === 'en' ? 'en' : 'zh-cn')
 }
 
 const pwdShow = ref(false)
@@ -210,7 +208,7 @@ function submitPwd() {
   padding: 40px 40px;
 
   @media (max-width: 767px) {
-    padding: 30px 30px;
+    padding: 24px 16px;
   }
 
   .update-pwd {
@@ -232,8 +230,8 @@ function submitPwd() {
 
     .item {
       display: grid;
-      grid-template-columns: 50px 1fr;
-      gap: 140px;
+      grid-template-columns: 100px minmax(0, 1fr);
+      gap: 24px;
       position: relative;
       .user-name {
         display: grid;
@@ -246,21 +244,32 @@ function submitPwd() {
       }
 
       .edit-name-input {
-        position: absolute;
-        bottom: -6px;
+        display: flex;
+        align-items: center;
+        min-width: 0;
         .el-input {
-          width: min(200px,calc(100vw - 222px));
+          flex: 1;
+          min-width: 0;
+          width: auto;
+          max-width: 200px;
         }
       }
 
       .edit-name {
-        color: #4dabff;
-        padding-left: 10px;
+        color: var(--el-color-primary);
+        background: transparent;
+        border: 0;
+        min-height: 44px;
+        flex-shrink: 0;
+        white-space: nowrap;
+        padding: 0 10px;
+        font: inherit;
         cursor: pointer;
       }
 
       @media (max-width: 767px) {
-        gap: 70px;
+        grid-template-columns: 80px minmax(0, 1fr);
+        gap: 12px;
       }
 
       div:first-child {
@@ -268,9 +277,8 @@ function submitPwd() {
       }
 
       div:last-child {
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
+        min-width: 0;
+        overflow-wrap: anywhere;
       }
     }
   }

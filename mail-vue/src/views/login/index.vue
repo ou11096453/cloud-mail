@@ -413,8 +413,14 @@ const submit = () => {
 
 async function saveToken(token) {
   localStorage.setItem('token', token)
+  let user;
+  try {
+    user = await loginUserInfo();
+  } catch (error) {
+    localStorage.removeItem('token');
+    throw error;
+  }
   refreshWebsiteConfig()
-  const user = await loginUserInfo();
   accountStore.currentAccountId = user.account.accountId;
   accountStore.currentAccount = user.account;
   userStore.user = user;
@@ -606,7 +612,9 @@ function submitRegister() {
 .form-wrapper {
   position: fixed;
   right: 0;
-  height: 100%;
+  top: 0;
+  height: 100dvh;
+  overflow-y: auto;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -622,9 +630,15 @@ function submitRegister() {
   padding-right: 40px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  margin-top: auto;
+  margin-bottom: auto;
+  flex-shrink: 0;
   width: 450px;
-  height: 100%;
+  min-height: 100%;
+  height: auto;
+  box-sizing: border-box;
+  padding-top: 24px;
+  padding-bottom: 24px;
   border-left: 1px solid var(--login-border);
   box-shadow: var(--el-box-shadow-light);
   @media (max-width: 1024px) {
@@ -637,13 +651,14 @@ function submitRegister() {
     padding: 20px 18px;
     border-radius: 6px;
     height: fit-content;
+    min-height: 0;
     width: 100%;
     margin-right: 18px;
     margin-left: 18px;
   }
 
   .btn {
-    height: 36px;
+    min-height: 44px;
     width: 100%;
     border-radius: 6px;
   }

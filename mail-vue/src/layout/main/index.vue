@@ -1,7 +1,7 @@
 <template>
-  <div :class="accountShow && hasPerm('account:query') ? 'main-box-show' : 'main-box-hide'">
-    <div :class="accountShow && hasPerm('account:query') ? 'block-show' : 'block-hide'" @click="uiStore.accountShow = false"></div>
-    <account  :class="accountShow && hasPerm('account:query') ? 'show' : 'hide'" />
+  <div :class="panelVisible ? 'main-box-show' : 'main-box-hide'">
+    <button v-if="panelVisible && isMobile" type="button" class="block-show" :aria-label="$t('close')" @click="uiStore.accountShow = false"></button>
+    <account :inert="!panelVisible" :aria-hidden="!panelVisible" :class="panelVisible ? 'show' : 'hide'" />
     <router-view class="main-view" v-slot="{ Component,route }">
       <keep-alive :include="['email','all-email','send','sys-setting','star','user','role','analysis','reg-key','draft']">
         <component :is="Component" :key="route.name"/>
@@ -16,16 +16,24 @@ import {useSettingStore} from "@/store/setting.js";
 import {computed, onBeforeUnmount, onMounted, watch} from "vue";
 import { useRoute } from 'vue-router'
 import { hasPerm } from "@/perm/perm.js"
+import { useMediaQuery } from '@vueuse/core'
 
 const settingStore = useSettingStore()
 const uiStore = useUiStore();
 const route = useRoute()
-let  innerWidth =  window.innerWidth
+const isMobile = useMediaQuery('(max-width: 767px)')
 
 let elNotification = null
 
 const accountShow = computed(() => {
   return uiStore.accountShow && settingStore.settings.manyEmail === 0
+})
+const panelVisible = computed(() => accountShow.value && hasPerm('account:query'))
+
+watch(isMobile, mobile => {
+  if (['content', 'email', 'send'].includes(route.meta.name)) {
+    uiStore.accountShow = !mobile
+  }
 })
 
 watch(() => uiStore.changeNotice, () => {
@@ -81,59 +89,42 @@ function showNotice(data) {
   })
 }
 
-onMounted(() => {
-  window.addEventListener('resize', handleResize)
-  handleResize()
-})
-
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', handleResize)
+  elNotification?.close()
 })
-
-const handleResize = () => {
-  if (['content','email','send'].includes(route.meta.name)) {
-    if (innerWidth !==  window.innerWidth) {
-      innerWidth = window.innerWidth;
-      uiStore.accountShow = window.innerWidth >= 767;
-    }
-  }
-}
 
 </script>
 <style lang="scss" scoped>
 
 .block-show {
   position: fixed;
+  inset: 60px 0 0;
   @media (max-width: 767px) {
-    position: absolute;
-    right: 0;
     border: 0;
-    height: 100%;
     width: 100%;
     background: #000000;
     opacity: 0.6;
     z-index: 10;
-    transition: all 300ms;
+    cursor: pointer;
   }
 }
 
-.block-hide {
-  position: fixed;
-  pointer-events: none;
-  transition: all 300ms;
-}
-
 .show {
-  transition: all 100ms;
+  min-width: 0;
+  transition: transform 150ms ease-out;
   @media (max-width: 767px) {
     position: fixed;
     z-index: 100;
     width: 260px;
+    max-width: calc(100vw - 44px);
+    top: 60px;
+    bottom: 0;
+    height: auto;
   }
 }
 
 .hide {
-  transition: all 100ms;
+  transition: transform 150ms ease-out;
   position: fixed;
   transform: translateX(-100%);
   opacity: 0;
@@ -146,7 +137,7 @@ const handleResize = () => {
 
 .main-box-show {
   display: grid;
-  grid-template-columns: 260px  1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
   height: calc(100% - 60px);
   @media (max-width: 767px) {
     grid-template-columns: 1fr;
@@ -155,13 +146,23 @@ const handleResize = () => {
 
 .main-box-hide {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   height: calc(100% - 60px);
 }
 
 
 .main-view {
   background: var(--el-bg-color);
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .show,
+  .hide {
+    transition: none;
+  }
 }
 
 

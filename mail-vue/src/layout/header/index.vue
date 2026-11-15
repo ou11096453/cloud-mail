@@ -1,31 +1,31 @@
 <template>
   <div class="header" :class="!hasPerm('email:send') ? 'not-send' : ''">
     <div class="header-btn">
-      <hanburger @click="changeAside"></hanburger>
+      <hanburger :is-active="uiStore.asideShow" @click="changeAside"></hanburger>
       <span class="breadcrumb-item">{{ $t(route.meta.title) }}</span>
     </div>
-    <div v-perm="'email:send'" class="writer-box" @click="openSend">
+    <button type="button" v-perm="'email:send'" class="writer-box" :aria-label="$t('compose')" :title="$t('compose')" @click="openSend">
       <div class="writer">
         <Icon icon="material-symbols:edit-outline-sharp" width="22" height="22"/>
       </div>
-    </div>
+    </button>
     <div class="toolbar">
-      <div v-if="uiStore.dark" class="sun-icon icon-item" @click="openDark($event)">
+      <button type="button" v-if="uiStore.dark" class="sun-icon icon-item" :aria-label="$t('toggleTheme')" :title="$t('toggleTheme')" @click="openDark($event)">
         <Icon icon="mingcute:sun-fill"/>
-      </div>
-      <div v-else class="dark-icon icon-item" @click="openDark($event)">
+      </button>
+      <button type="button" v-else class="dark-icon icon-item" :aria-label="$t('toggleTheme')" :title="$t('toggleTheme')" @click="openDark($event)">
         <Icon icon="solar:moon-linear"/>
-      </div>
-      <div class="notice icon-item" @click="openNotice">
+      </button>
+      <button type="button" class="notice icon-item" :aria-label="$t('announcement')" :title="$t('announcement')" @click="openNotice">
         <Icon icon="streamline-plump:announcement-megaphone"/>
-      </div>
-      <el-dropdown ref="userinfoRef" @visible-change="e => userInfoShow = e" :teleported="false" popper-class="detail-dropdown">
-        <div class="avatar" @click="userInfoHide" >
+      </button>
+      <el-dropdown ref="userinfoRef" trigger="click" @visible-change="e => userInfoShow = e" popper-class="detail-dropdown">
+        <button type="button" class="avatar" :aria-label="$t('profile')" >
           <div class="avatar-text">
             <div>{{ formatName(userStore.user.email) }}</div>
           </div>
           <Icon class="setting-icon" icon="mingcute:down-small-fill" width="24" height="24"/>
-        </div>
+        </button>
         <template #dropdown>
           <div class="user-details">
             <div class="details-avatar">
@@ -196,7 +196,7 @@ function openDark(e) {
   const nextIsDark = !uiStore.dark
   const root = document.documentElement
 
-  if (!document.startViewTransition) {
+  if (!document.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     switchDark(nextIsDark, root);
     return
   }
@@ -251,7 +251,7 @@ function clickLogout() {
 }
 
 function formatName(email) {
-  return email[0]?.toUpperCase() || ''
+  return email?.[0]?.toUpperCase() || ''
 }
 
 </script>
@@ -361,7 +361,7 @@ function formatName(email) {
   display: grid;
   height: 100%;
   gap: 10px;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: minmax(0, auto) auto 1fr;
 }
 
 .header.not-send {
@@ -374,6 +374,8 @@ function formatName(email) {
   align-items: center;
   justify-content: center;
   margin-left: 5px;
+  min-width: 44px;
+  min-height: 44px;
 
   .writer {
     width: 34px;
@@ -381,7 +383,6 @@ function formatName(email) {
     border-radius: 50%;
     color: #ffffff;
     background: linear-gradient(135deg, #1890ff, #3a80dd);
-    transition: all 0.3s ease;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -420,8 +421,9 @@ function formatName(email) {
 
   .icon-item {
     align-self: center;
-    width: 30px;
-    height: 30px;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
     border-radius: 4px;
     display: flex;
     align-items: center;
@@ -450,6 +452,7 @@ function formatName(email) {
     display: flex;
     align-items: center;
     cursor: pointer;
+    min-height: 44px;
 
     .avatar-text {
       background: var(--el-bg-color);
@@ -473,7 +476,20 @@ function formatName(email) {
 
 }
 
-.el-tooltip__trigger:first-child:focus-visible {
-  outline: unset;
+@media (max-width: 767px) {
+  .header {
+    gap: 2px;
+    padding-right: max(4px, env(safe-area-inset-right));
+  }
+  .toolbar {
+    gap: 0;
+  }
+  .toolbar .avatar .setting-icon {
+    margin-right: 0;
+    width: 16px;
+  }
+  .writer-box {
+    margin-left: 0;
+  }
 }
 </style>

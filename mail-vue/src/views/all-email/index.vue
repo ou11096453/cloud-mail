@@ -51,12 +51,15 @@
           <el-option key="4" :label="$t('selectDeleted')" value="delete"/>
           <el-option key="4" :label="$t('noRecipientTitle')" value="noone"/>
         </el-select>
-        <Icon class="icon" icon="iconoir:search" @click="search" width="20" height="20"/>
-        <Icon class="icon" @click="changeTimeSort" icon="material-symbols-light:timer-arrow-down-outline"
-              v-if="params.timeSort === 0" width="28" height="28"/>
-        <Icon class="icon" @click="changeTimeSort" icon="material-symbols-light:timer-arrow-up-outline" v-else
-              width="28" height="28"/>
-        <Icon class="icon clear" icon="fluent:broom-sparkle-16-regular" width="22" height="22" @click="openBathDelete"/>
+        <button type="button" class="icon-button" :aria-label="$t('search')" :title="$t('search')" @click="search">
+          <Icon icon="iconoir:search" width="20"/>
+        </button>
+        <button type="button" class="icon-button" :aria-label="$t('sortTime')" :title="$t('sortTime')" @click="changeTimeSort">
+          <Icon :icon="params.timeSort === 0 ? 'material-symbols-light:timer-arrow-down-outline' : 'material-symbols-light:timer-arrow-up-outline'" width="28"/>
+        </button>
+        <button type="button" class="icon-button" :aria-label="$t('clearEmail')" :title="$t('clearEmail')" @click="openBathDelete">
+          <Icon icon="fluent:broom-sparkle-16-regular" width="22"/>
+        </button>
       </template>
     </emailScroll>
     <el-dialog v-model="showBathDelete" :title="$t('clearEmail')" width="335"
@@ -90,7 +93,7 @@
 <script setup>
 import {starAdd, starCancel} from "@/request/star.js";
 import emailScroll from "@/components/email-scroll/index.vue"
-import {computed, defineOptions, reactive, ref, watch, onMounted} from "vue";
+import {computed, defineOptions, reactive, ref, watch, onMounted, onUnmounted} from "vue";
 import {useEmailStore} from "@/store/email.js";
 import {
   allEmailList,
@@ -174,11 +177,12 @@ const selectTitle = computed(() => {
 
 const paramsStar = localStorage.getItem('all-email-params')
 if (paramsStar) {
-  const locaParams = JSON.parse(paramsStar)
-  params.type = locaParams.type
-  params.timeSort = locaParams.timeSort
-  params.status = locaParams.status
-  params.searchType = locaParams.searchType
+  try {
+    const locaParams = JSON.parse(paramsStar)
+    if (['all', 'receive', 'send', 'delete', 'noone'].includes(locaParams.type)) params.type = locaParams.type
+    params.timeSort = locaParams.timeSort === 1 ? 1 : 0
+    if (['name', 'subject', 'user', 'account'].includes(locaParams.searchType)) params.searchType = locaParams.searchType
+  } catch {}
 }
 
 watch(() => params, () => {
@@ -292,13 +296,16 @@ function getEmailList(emailId, size) {
   return allEmailList({emailId, size, ...params})
 }
 
-async function latest() {
+let disposed = false
+onUnmounted(() => { disposed = true })
 
-  while (true) {
+async function latest() {
+  while (!disposed) {
 
     let autoRefresh = settingStore.settings.autoRefresh;
 
     await sleep(autoRefresh > 1 ? autoRefresh * 1000 : 3000);
+    if (disposed) break;
 
     const latestId = sysEmailScroll.value.latestEmail?.emailId
 
@@ -328,7 +335,7 @@ async function latest() {
         continue
       }
 
-      if (params.type !== 'receive') {
+      if (disposed || params.type !== 'receive') {
         continue
       }
 
@@ -340,7 +347,6 @@ async function latest() {
       for (let email of list) {
 
         sysEmailScroll.value.addItem(email)
-        await sleep(50)
 
       }
 
@@ -423,7 +429,7 @@ async function latest() {
 .search-input {
   width: 100%;
   max-width: 280px;
-  height: 28px;
+  min-width: 0;
 
   .setting-icon {
     position: relative;
@@ -478,33 +484,16 @@ async function latest() {
   cursor: pointer;
 }
 
-.clear {
-  @media (max-width: 419px) {
-    position: absolute;
-    top: 41px;
-    left: 242px;
+@media (max-width: 767px) {
+  :deep(.header-actions) {
+    grid-template-columns: 44px minmax(0, 1fr);
+    align-items: start;
+    padding: 4px 8px;
   }
-}
-
-:deep(.reload) {
-  @media (max-width: 419px) {
-    position: absolute;
-    top: 42px;
-    left: 208px;
-  }
-}
-
-:deep(.delete) {
-  @media (max-width: 456px) {
-    position: absolute;
-    top: 43px;
-    left: 294px;
-  }
-
-  @media (max-width: 419px) {
-    position: absolute;
-    top: 43px;
-    left: 282px;
-  }
+  :deep(.header-right) { display: none; }
+  :deep(.header-left) { gap: 4px; }
+  .search-input { flex: 1 1 100%; max-width: none; }
+  .status-select { width: 110px; margin: 0; }
+  :deep(.el-date-editor.el-input__wrapper) { width: 100%; }
 }
 </style>

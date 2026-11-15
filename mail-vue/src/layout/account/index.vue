@@ -1,27 +1,37 @@
 <template>
   <div class="account-box">
     <div class="head-opt">
-      <Icon v-perm="'account:add'" class="icon add" icon="ion:add-outline" width="23" height="23" @click="add"/>
-      <Icon class="icon refresh" icon="ion:reload" width="18" height="18" @click="refresh"/>
+      <button v-perm="'account:add'" type="button" class="icon-button" :aria-label="$t('addAccount')" :title="$t('addAccount')" @click="add">
+        <Icon icon="ion:add-outline" width="23"/>
+      </button>
+      <button type="button" class="icon-button" :aria-label="$t('refresh')" :title="$t('refresh')" @click="refresh">
+        <Icon icon="ion:reload" width="18"/>
+      </button>
     </div>
     <el-scrollbar class="scrollbar" ref="scrollbarRef">
       <div v-infinite-scroll="getAccountList" :infinite-scroll-distance="600" :infinite-scroll-immediate="false">
         <el-card class="item" :class="itemBg(item.accountId)" v-for="(item, index) in accounts" :key="item.accountId"
-                 @click="changeAccount(item)">
+                 tabindex="0" @keydown.enter.self="changeAccount(item)" @click="changeAccount(item)">
           <div class="account">
             {{ item.email }}
           </div>
           <div class="opt">
             <div class="send-email" @click.stop>
-              <Icon @click="setAllReceive(item)" v-if="!item.allReceive" icon="eva:email-fill" width="22" height="22" color="#fccb1a"/>
-              <Icon @click="setAllReceive(item)" v-else icon="flat-color-icons:folder" width="22" height="22" color="#23c4f1" />
+              <button type="button" class="icon-button" :aria-label="$t('allMail')" :title="$t('allMail')" :aria-pressed="!!item.allReceive" @click="setAllReceive(item)">
+                <Icon v-if="!item.allReceive" icon="eva:email-fill" width="22" color="#fccb1a"/>
+                <Icon v-else icon="flat-color-icons:folder" width="22" color="#23c4f1"/>
+              </button>
             </div>
             <div class="settings" @click.stop>
-              <Icon icon="fluent-color:clipboard-24" width="22" height="22" @click.stop="copyAccount(item.email)"/>
+              <button type="button" class="icon-button" :aria-label="$t('copy')" :title="$t('copy')" @click.stop="copyAccount(item.email)">
+                <Icon icon="fluent-color:clipboard-24" width="22"/>
+              </button>
               <Icon icon="fluent:settings-24-filled" width="21" height="21" color="#909399"
                     v-if="showNullSetting(item)"/>
-              <el-dropdown v-else>
-                <Icon icon="fluent:settings-24-filled" width="21" height="21" color="#909399"/>
+              <el-dropdown v-else trigger="click" :teleported="true">
+                <button type="button" class="icon-button" :aria-label="$t('settings')" :title="$t('settings')">
+                  <Icon icon="fluent:settings-24-filled" width="21"/>
+                </button>
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item v-if="hasPerm('email:send')" @click="openSetName(item)">{{ $t('rename') }}</el-dropdown-item>
@@ -186,7 +196,8 @@ if (hasPerm('account:query')) {
 }
 
 watch(() => accountStore.changeUserAccountName, () => {
-  accounts[0].name = accountStore.changeUserAccountName
+  const account = accounts.find(item => item.accountId === userStore.user.account.accountId)
+  if (account) account.name = accountStore.changeUserAccountName
 })
 
 watch(() => settingStore.domainList, (list) => {
@@ -409,7 +420,7 @@ function getAccountList() {
     if (list.length < queryParams.size) {
       noLoading.value = true
     }
-    if (accounts.length === 0) {
+    if (accounts.length === 0 && list.length > 0) {
       accountStore.currentAccount = list[0]
     }
 
@@ -517,7 +528,8 @@ path[fill="#ffdda1"] {
 </style>
 <style scoped lang="scss">
 .account-box {
-
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   border-right: 1px solid var(--el-border-color) !important;
   background-color: var(--el-bg-color);
   height: 100%;
@@ -526,10 +538,11 @@ path[fill="#ffdda1"] {
   .head-opt {
     display: flex;
     align-items: center;
-    height: 38px;
+    min-height: 38px;
     box-shadow: var(--header-actions-border);
     padding-left: 10px;
     padding-right: 10px;
+    @media (max-width: 767px), (pointer: coarse) { min-height: 50px; }
 
     .icon {
       cursor: pointer;
@@ -550,11 +563,9 @@ path[fill="#ffdda1"] {
 
   .scrollbar {
     width: 100%;
-    height: calc(100% - 38px);
+    height: 100%;
+    min-height: 0;
     overflow: auto;
-    @media (max-width: 767px) {
-      height: calc(100% - 98px);
-    }
 
     .empty {
       display: flex;
@@ -603,7 +614,7 @@ path[fill="#ffdda1"] {
       .settings {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 4px;
       }
 
       .send-email {

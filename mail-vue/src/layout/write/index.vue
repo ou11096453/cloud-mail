@@ -1,5 +1,8 @@
 <template>
-  <div class="send" v-show="show">
+  <el-dialog v-model="show" class="compose-dialog" :fullscreen="isMobile" width="min(1367px, calc(100% - 64px))"
+             top="4vh" :show-close="false" :close-on-click-modal="false" :before-close="close"
+             :title="$t('compose')" @opened="editor?.focus()">
+  <div class="send">
     <div class="write-box">
       <div class="title">
         <div class="title-left">
@@ -10,12 +13,12 @@
           <span class="sender-name">{{ form.name }}</span>
           <span class="send-email"><{{ form.sendEmail }}></span>
         </div>
-        <div @click="close" style="cursor: pointer;">
+        <button type="button" class="icon-button" :aria-label="$t('close')" :title="$t('close')" @click="close">
           <Icon icon="material-symbols-light:close-rounded" width="22" height="22"/>
-        </div>
+        </button>
       </div>
       <div class="container">
-        <el-input-tag  @add-tag="addTagChange" tag-type="primary" @input="inputChange" size="default" v-model="form.receiveEmail" >
+        <el-input-tag :aria-label="$t('recipient')" @add-tag="addTagChange" tag-type="primary" @input="inputChange" size="default" v-model="form.receiveEmail" >
           <template #prefix>
             <div class="item-title" >{{ $t('recipient') }}</div>
             <el-select
@@ -39,26 +42,29 @@
           </template>
           <template #suffix>
             <div style="display: flex;margin-right: 3px;">
-              <Icon icon="fa7-solid:user-plus" width="20" height="20" class="add-contact" @click.stop="openContacts" />
+              <button type="button" class="icon-button add-contact" :aria-label="$t('recentContacts')" :title="$t('recentContacts')" @click.stop="openContacts">
+                <Icon icon="fa7-solid:user-plus" width="20"/>
+              </button>
             </div>
           </template>
         </el-input-tag>
-        <el-input v-model="form.subject" :placeholder="t('subject')" />
+        <el-input v-model="form.subject" :placeholder="t('subject')" :aria-label="$t('subject')" />
         <tinyEditor :def-value="defValue" ref="editor" @change="change" @focus="focusChange" />
         <div class="button-item">
-          <div class="att-add" @click="chooseFile">
+          <button type="button" class="icon-button att-add" :aria-label="$t('attachments')" :title="$t('attachments')" @click="chooseFile">
             <Icon icon="iconamoon:attachment-fill" width="24" height="24"/>
-          </div>
-          <div class="att-clear" @click="clearContent">
+          </button>
+          <button type="button" class="icon-button att-clear" :aria-label="$t('clear')" :title="$t('clear')" @click="clearContent">
             <Icon icon="icon-park-outline:clear-format" width="24" height="24 "/>
-          </div>
+          </button>
           <div class="att-list">
             <div class="att-item" v-for="(item,index) in form.attachments" :key="index">
               <Icon v-bind="getIconByName(item.filename)"/>
               <span class="att-filename">{{ item.filename }}</span>
               <span class="att-size">{{ formatBytes(item.size) }}</span>
-              <Icon style="cursor: pointer;" icon="material-symbols-light:close-rounded" @click="delAtt(index)"
-                    width="22" height="22"/>
+              <button type="button" class="icon-button" :aria-label="$t('delete') + ': ' + item.filename" :title="$t('delete')" @click="delAtt(index)">
+                <Icon icon="material-symbols-light:close-rounded" width="22"/>
+              </button>
             </div>
           </div>
           <div>
@@ -70,7 +76,7 @@
       </div>
     </div>
     <el-dialog top="10vh" v-model="showContacts" @closed="clearSelectContact" :title="t('recentContacts')">
-      <el-table ref="contactsTabRef" row-key="email" :data="contacts" style="height: 445px">
+      <el-table ref="contactsTabRef" row-key="email" :data="contacts" style="height: min(445px, 55dvh)">
         <el-table-column type="selection" width="32" />
         <el-table-column property="email" :label="t('emailAccount')" >
           <template #default="props">
@@ -91,10 +97,13 @@
       </div>
     </el-dialog>
   </div>
+  </el-dialog>
 </template>
 <script setup>
 import tinyEditor from '@/components/tiny-editor/index.vue'
-import {h, nextTick, onMounted, onUnmounted, reactive, ref, toRaw, computed} from "vue";
+import {h, nextTick, reactive, ref, toRaw, computed} from "vue";
+import {useMediaQuery} from '@vueuse/core';
+import {escapeHtml, parseEmailHtml} from '@/utils/email-html.js';
 import {Icon} from "@iconify/vue";
 import {useUserStore} from "@/store/user.js";
 import {emailSend} from "@/request/email.js";
@@ -128,7 +137,8 @@ const draftStore = userDraftStore()
 const settingStore = useSettingStore()
 const emailStore = useEmailStore();
 const accountStore = useAccountStore()
-const editor = ref({})
+const editor = ref(null)
+const isMobile = useMediaQuery('(max-width: 1024px)')
 const userStore = useUserStore();
 const show = ref(false);
 const percent = ref(0)
@@ -309,7 +319,7 @@ async function sendEmail() {
   }
 
   if (!form.content) {
-    form.content = editor.value.getContent();
+    form.content = editor.value?.getContent() || defValue.value;
   }
 
   if (!form.content) {
@@ -421,7 +431,8 @@ function resetForm() {
   backReply.subject = ''
   backReply.receiveEmail = []
   backReply.sendType = ''
-  editor.value.clearEditor()
+  defValue.value = ''
+  editor.value?.clearEditor()
 }
 
 function change(content, text) {
@@ -445,14 +456,14 @@ function openForward(email) {
 
   setTimeout(() => {
     defValue.value = `
-      ${formatImage(email.content) || `<pre style="font-family: inherit;word-break: break-word;white-space: pre-wrap;margin: 0">${email.text}</pre>`}
+      ${formatImage(email.content) || `<pre style="font-family: inherit;word-break: break-word;white-space: pre-wrap;margin: 0">${escapeHtml(email.text)}</pre>`}
     `
     open()
 
     nextTick(() => {
-      backReply.content = editor.value.getContent()
+      backReply.content = editor.value?.getContent() || defValue.value
       backReply.subject = form.subject
-      backReply.receiveEmail = form.receiveEmail
+      backReply.receiveEmail = [...form.receiveEmail]
       backReply.sendType = form.sendType
     })
 
@@ -481,19 +492,19 @@ function openReply(email) {
     <div></div>
     <div>
     <br>
-        ${formatDetailDate(email.createTime)} ${email.name} &lt${email.sendEmail}&gt ${t('wrote')}:
+        ${formatDetailDate(email.createTime)} ${escapeHtml(email.name)} &lt;${escapeHtml(email.sendEmail)}&gt; ${t('wrote')}:
     </div>
     <blockquote class="mceNonEditable" style="margin: 0 0 0 0.8ex;border-left: 1px solid rgb(204,204,204);padding-left: 1ex;">
-      <articl>
-          ${formatImage(email.content) || `<pre style="font-family: inherit;word-break: break-word;white-space: pre-wrap;margin: 0">${email.text}</pre>`}
+      <article>
+          ${formatImage(email.content) || `<pre style="font-family: inherit;word-break: break-word;white-space: pre-wrap;margin: 0">${escapeHtml(email.text)}</pre>`}
       </article>
     </blockquote>`
     open()
 
     nextTick(() => {
-      backReply.content = editor.value.getContent()
+      backReply.content = editor.value?.getContent() || defValue.value
       backReply.subject = form.subject
-      backReply.receiveEmail = form.receiveEmail
+      backReply.receiveEmail = [...form.receiveEmail]
       backReply.sendType = form.sendType
     })
   })
@@ -503,11 +514,11 @@ function openReply(email) {
 function formatImage(content) {
   content = content || '';
   const domain = settingStore.settings.r2Domain;
-  return content.replace(/{{domain}}/g, toOssDomain(domain) + '/');
+  return parseEmailHtml(content.replace(/{{domain}}/g, toOssDomain(domain) + '/')).body.innerHTML;
 }
 
 function open() {
-  if (!accountStore.currentAccount.email) {
+  if (!accountStore.currentAccount?.email) {
     form.sendEmail = userStore.user.email;
     form.accountId = userStore.user.account.accountId;
     form.name = userStore.user.name;
@@ -517,7 +528,7 @@ function open() {
     form.name = accountStore.currentAccount.name;
   }
   show.value = true;
-  editor.value.focus()
+  nextTick(() => editor.value?.focus())
 }
 
 function openDraft(draft) {
@@ -525,29 +536,16 @@ function openDraft(draft) {
   defValue.value = ''
   setTimeout(() => defValue.value = form.content)
   show.value = true;
-  editor.value.focus()
+  nextTick(() => editor.value?.focus())
 }
 
-const handleKeyDown = (event) => {
-  if (event.key === 'Escape') {
-    close()
-  }
-};
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKeyDown);
-});
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeyDown);
-});
-
 function close() {
+  if (!show.value || showContacts.value) return;
 
   if (selectStatus) openSelect();
 
   if (!form.content) {
-    form.content = editor.value.getContent();
+    form.content = editor.value?.getContent() || defValue.value;
   }
 
   if (form.draftId) {
@@ -565,7 +563,7 @@ function close() {
 
   if (backReply.sendType === 'reply' || backReply.sendType === 'forward') {
     let subjectFlag = form.subject === backReply.subject
-    let contentFlag = editor.value.getContent() === backReply.content
+    let contentFlag = (editor.value?.getContent() || defValue.value) === backReply.content
     let receiveFlag = form.receiveEmail.length === 1 && form.receiveEmail[0] === backReply.receiveEmail[0]
     if (backReply.sendType === 'forward' && form.receiveEmail.length === 0) {
       receiveFlag = true;
@@ -587,8 +585,10 @@ function close() {
     delete formData.draftId
     delete formData.attachments
     formData.createTime = dayjs().utc().format('YYYY-MM-DD HH:mm:ss');
-    const draftId = await db.value.draft.add({...formData})
-    db.value.att.add({draftId, attachments: toRaw(form.attachments)})
+    await db.value.transaction('rw', db.value.draft, db.value.att, async () => {
+      const draftId = await db.value.draft.add({...formData})
+      await db.value.att.add({draftId, attachments: toRaw(form.attachments)})
+    })
     draftStore.refreshList++
     show.value = false
     await nextTick(() => {
@@ -598,6 +598,8 @@ function close() {
     if (action === 'cancel') {
       show.value = false
       resetForm()
+    } else if (action instanceof Error) {
+      ElMessage({ message: t('reqFailErrorMsg'), type: 'error', plain: true })
     }
   })
 
@@ -605,6 +607,19 @@ function close() {
 
 </script>
 <style>
+.compose-dialog {
+  padding: 0;
+  overflow: hidden;
+}
+.compose-dialog > .el-dialog__header { display: none; }
+.compose-dialog > .el-dialog__body { height: 100%; }
+.compose-dialog.is-fullscreen {
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100dvh;
+  margin: 0;
+}
 .write-select .el-select-dropdown__list {
   padding: 4px 4px !important;
 }
@@ -618,25 +633,20 @@ function close() {
 </style>
 <style scoped lang="scss">
 .send {
-  position: fixed;
-  top: 0;
-  left: 0;
   width: 100%;
   height: 100%;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
 
   .write-box {
     background: var(--el-bg-color);
-    width: min(1367px, calc(100% - 80px));
-    box-shadow: var(--el-box-shadow-light);
-    border: 1px solid var(--el-border-color-light);
-    transition: var(--el-transition-duration);
+    width: 100%;
     padding: 15px;
     border-radius: 8px;
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
     overflow: hidden;
     @media (max-width: 1024px) {
       width: 100%;
@@ -644,21 +654,26 @@ function close() {
       border-radius: 0;
       border: 0;
       padding-top: 10px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      padding-left: max(10px, env(safe-area-inset-left));
+      padding-right: max(10px, env(safe-area-inset-right));
     }
 
     @media (min-width: 1025px) {
-      height: min(800px, calc(100vh - 60px));
+      height: min(800px, 90dvh);
     }
 
     .title {
       display: flex;
       justify-content: space-between;
       margin-bottom: 10px;
+      min-width: 0;
 
       .title-left {
+        min-width: 0;
         align-items: center;
         display: grid;
-        grid-template-columns: auto auto auto 1fr;
+        grid-template-columns: auto auto auto minmax(0, 1fr);
       }
 
       .title-text {
@@ -671,10 +686,15 @@ function close() {
       .sender-name {
         margin-left: 8px;
         font-weight: bold;
+        max-width: 160px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        @media (max-width: 480px) { max-width: 80px; }
       }
 
       .send-email {
-        color: #999896;
+        color: var(--el-text-color-regular);
         margin-left: 5px;
         white-space: nowrap;
         text-overflow: ellipsis;
@@ -689,17 +709,30 @@ function close() {
     }
 
     .container {
+      min-width: 0;
+      min-height: 0;
       height: 100%;
       display: grid;
-      grid-template-rows: auto auto 1fr auto;
-      gap: 15px;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      gap: 10px;
+      @media (max-height: 500px) {
+        grid-template-rows: auto auto minmax(160px, 1fr) auto;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
 
       .item-title {
       }
 
       .button-item {
         display: grid;
-        grid-template-columns: auto auto 1fr auto;
+        align-items: center;
+        grid-template-columns: auto auto minmax(0, 1fr) auto;
+        @media (max-width: 767px) {
+          grid-template-columns: auto auto 1fr auto;
+          .att-list { grid-column: 1 / -1; grid-row: 2; padding: 0; }
+          > div:last-child { grid-column: 4; grid-row: 1; }
+        }
 
         .att-add {
           cursor: pointer;
@@ -724,9 +757,9 @@ function close() {
 
           .att-item {
             display: grid;
-            grid-template-columns: auto 1fr auto auto;
+            grid-template-columns: auto minmax(0, 1fr) auto auto;
             gap: 5px;
-            height: 32px;
+            min-height: 44px;
             font-size: 14px;
             padding: 4px 5px;
             background: var(--light-ill);
@@ -771,7 +804,7 @@ function close() {
 
 .write-select {
   position: absolute;
-  width: 300px;
+  width: min(300px, 70%);
   left: 60px;
   z-index: 0;
   opacity: 0;
