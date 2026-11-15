@@ -1,8 +1,13 @@
 <template>
   <div :class="panelVisible ? 'main-box-show' : 'main-box-hide'">
-    <button v-if="panelVisible && isMobile" type="button" class="block-show" :aria-label="$t('close')" @click="uiStore.accountShow = false"></button>
-    <account :inert="!panelVisible" :aria-hidden="!panelVisible" :class="panelVisible ? 'show' : 'hide'" />
-    <router-view class="main-view" v-slot="{ Component,route }">
+    <button v-if="mobilePanelVisible" type="button" class="block-show" tabindex="-1" :aria-label="$t('close')" @click="uiStore.accountShow = false"></button>
+    <ElFocusTrap :trapped="mobilePanelVisible" :loop="mobilePanelVisible" :focus-trap-el="accountPanel?.$el"
+                 @release-requested="uiStore.accountShow = false">
+      <account ref="accountPanel" id="mailbox-panel" tabindex="-1" :inert="!panelVisible" :aria-hidden="!panelVisible"
+               :role="isMobile ? 'dialog' : undefined" :aria-modal="mobilePanelVisible ? true : undefined"
+               :aria-label="$t('emailAccount')" :class="panelVisible ? 'show' : 'hide'" />
+    </ElFocusTrap>
+    <router-view class="main-view" :inert="mobilePanelVisible" v-slot="{ Component,route }">
       <keep-alive :include="['email','all-email','send','sys-setting','star','user','role','analysis','reg-key','draft']">
         <component :is="Component" :key="route.name"/>
       </keep-alive>
@@ -13,15 +18,17 @@
 import account from '@/layout/account/index.vue'
 import {useUiStore} from "@/store/ui.js";
 import {useSettingStore} from "@/store/setting.js";
-import {computed, onBeforeUnmount, onMounted, watch} from "vue";
+import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from "vue";
 import { useRoute } from 'vue-router'
 import { hasPerm } from "@/perm/perm.js"
 import { useMediaQuery } from '@vueuse/core'
+import { ElFocusTrap } from 'element-plus/es/components/focus-trap/index.mjs'
 
 const settingStore = useSettingStore()
 const uiStore = useUiStore();
 const route = useRoute()
 const isMobile = useMediaQuery('(max-width: 767px)')
+const accountPanel = ref()
 
 let elNotification = null
 
@@ -29,6 +36,13 @@ const accountShow = computed(() => {
   return uiStore.accountShow && settingStore.settings.manyEmail === 0
 })
 const panelVisible = computed(() => accountShow.value && hasPerm('account:query'))
+const mobilePanelVisible = computed(() => isMobile.value && panelVisible.value)
+
+watch(panelVisible, (visible, wasVisible) => {
+  if (!visible && wasVisible && isMobile.value) {
+    nextTick(() => document.querySelector('.main-view .mailbox-switcher')?.focus())
+  }
+})
 
 watch(isMobile, mobile => {
   if (['content', 'email', 'send'].includes(route.meta.name)) {

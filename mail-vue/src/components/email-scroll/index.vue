@@ -1,5 +1,18 @@
 <template>
-  <div class="email-container">
+  <div class="email-container" :class="{ 'has-mailbox-header': showAccountIcon }">
+    <div v-if="showAccountIcon" class="mailbox-header">
+      <button v-if="canSwitchAccount" type="button" class="mailbox-switcher"
+              :aria-label="$t('switchMailbox') + ': ' + currentMailboxLabel"
+              :title="$t('switchMailbox')" :aria-expanded="accountShow"
+              aria-controls="mailbox-panel" @click="changeAccountShow">
+        <Icon icon="akar-icons:dot-grid-fill" width="18" height="18" aria-hidden="true"/>
+        <span class="mailbox-address" :title="currentMailboxLabel" translate="no">{{ currentMailboxLabel }}</span>
+      </button>
+      <div v-else class="mailbox-current">
+        <span class="mailbox-address" :title="currentMailboxLabel" translate="no">{{ currentMailboxLabel }}</span>
+      </div>
+      <span class="email-count" v-if="total">{{ $t('emailCount', {total: total}) }}</span>
+    </div>
     <div class="header-actions">
       <el-checkbox
           v-model="checkAll"
@@ -25,12 +38,8 @@
         </button>
       </div>
 
-      <div class="header-right">
+      <div v-if="!showAccountIcon" class="header-right">
         <span class="email-count" v-if="total">{{ $t('emailCount', {total: total}) }}</span>
-        <button v-if="showAccountIcon" type="button" class="icon-button" :aria-label="$t('emailAccount')" :title="$t('emailAccount')"
-                :aria-expanded="accountShow" @click="changeAccountShow">
-          <Icon width="16" icon="akar-icons:dot-grid-fill"/>
-        </button>
       </div>
     </div>
 
@@ -253,8 +262,10 @@ import {Icon} from "@iconify/vue";
 import skeletonBlock from "@/components/email-scroll/skeleton/index.vue"
 import {computed, onActivated, reactive, ref, watch, nextTick, onMounted, onUnmounted } from "vue";
 import {useEmailStore} from "@/store/email.js";
+import {useAccountStore} from "@/store/account.js";
 import {useUiStore} from "@/store/ui.js";
 import {useSettingStore} from "@/store/setting.js";
+import {hasPerm} from "@/perm/perm.js";
 import {fromNow} from "@/utils/day.js";
 import {useI18n} from "vue-i18n";
 import {EmailUnreadEnum} from "@/enums/email-enum.js";
@@ -315,6 +326,7 @@ const props = defineProps({
 const emit = defineEmits(['jump', 'refresh-before', 'delete-draft', 'right-search'])
 const {t} = useI18n()
 const settingStore = useSettingStore()
+const accountStore = useAccountStore()
 const uiStore = useUiStore();
 const emailStore = useEmailStore();
 const loading = ref(false);
@@ -563,9 +575,9 @@ function getSkeletonRows() {
   skeletonRows = emailList.length
 }
 
-const accountShow = computed(() => {
-  return uiStore.accountShow && settingStore.settings.manyEmail === 0
-})
+const canSwitchAccount = computed(() => props.showAccountIcon && hasPerm('account:query') && settingStore.settings.manyEmail === 0)
+const accountShow = computed(() => canSwitchAccount.value && uiStore.accountShow)
+const currentMailboxLabel = computed(() => accountStore.currentAccount?.email || t('emailAccount'))
 
 function htmlToText(email) {
   if (email.content) {
@@ -931,6 +943,65 @@ function loadData() {
   color: var(--el-text-color-primary);
   overflow: hidden;
   height: 100%;
+}
+
+.has-mailbox-header {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.mailbox-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 2px max(8px, env(safe-area-inset-right)) 2px max(8px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.mailbox-switcher,
+.mailbox-current {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0 10px 0 6px;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.mailbox-switcher {
+  border-radius: 4px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.mailbox-switcher:hover,
+.mailbox-switcher[aria-expanded="true"] {
+  background: var(--base-fill);
+}
+
+.mailbox-switcher :deep(svg) {
+  flex-shrink: 0;
+}
+
+.mailbox-address {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.email-count {
+  white-space: nowrap;
+  font-size: 12px;
+  @media (max-width: 480px) { display: none; }
 }
 
 .scroll {
@@ -1316,11 +1387,6 @@ function loadData() {
     height: 100%;
     color: var(--el-text-color-primary);;
 
-    .email-count {
-      white-space: nowrap;
-      font-size: 12px;
-      @media (max-width: 480px) { display: none; }
-    }
   }
 
   .icon {

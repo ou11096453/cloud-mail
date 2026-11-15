@@ -4,6 +4,8 @@ const zh = {
     toggleTheme: '切换主题',
     announcement: '公告',
     close: '关闭',
+    switchMailbox: '切换邮箱',
+    closeMailboxes: '收起邮箱列表',
     refresh: '刷新',
     selectAll: '全选',
     retry: '重试',

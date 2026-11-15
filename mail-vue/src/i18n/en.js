@@ -4,6 +4,8 @@ const en = {
     toggleTheme: 'Switch theme',
     announcement: 'Announcement',
     close: 'Close',
+    switchMailbox: 'Switch Mailbox',
+    closeMailboxes: 'Close Mailbox List',
     refresh: 'Refresh',
     selectAll: 'Select all',
     retry: 'Retry',

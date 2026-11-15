@@ -7,6 +7,10 @@
       <button type="button" class="icon-button" :aria-label="$t('refresh')" :title="$t('refresh')" @click="refresh">
         <Icon icon="ion:reload" width="18"/>
       </button>
+      <button v-if="isMobile" type="button" class="icon-button mailbox-close"
+              :aria-label="$t('closeMailboxes')" :title="$t('closeMailboxes')" @click="uiStore.accountShow = false">
+        <Icon icon="material-symbols-light:close-rounded" width="24" height="24" aria-hidden="true"/>
+      </button>
     </div>
     <el-scrollbar class="scrollbar" ref="scrollbarRef">
       <div v-infinite-scroll="getAccountList" :infinite-scroll-distance="600" :infinite-scroll-immediate="false">
@@ -138,6 +142,7 @@
 <script setup>
 import {Icon} from "@iconify/vue";
 import {computed, nextTick, reactive, ref, watch} from "vue";
+import {useMediaQuery} from "@vueuse/core";
 import {
   accountList,
   accountAdd,
@@ -152,13 +157,16 @@ import {useSettingStore} from "@/store/setting.js";
 import {useAccountStore} from "@/store/account.js";
 import {useEmailStore} from "@/store/email.js";
 import {useUserStore} from "@/store/user.js";
+import {useUiStore} from "@/store/ui.js";
 import {hasPerm} from "@/perm/perm.js"
 import {useI18n} from "vue-i18n";
 import {AccountAllReceiveEnum} from "@/enums/account-enum.js";
 
 const {t} = useI18n();
 const userStore = useUserStore();
+const uiStore = useUiStore();
 const accountStore = useAccountStore();
+const isMobile = useMediaQuery('(max-width: 767px)')
 const settingStore = useSettingStore();
 const emailStore = useEmailStore();
 const showAdd = ref(false)
@@ -352,6 +360,7 @@ function refresh() {
 function changeAccount(account) {
   accountStore.currentAccountId = account.accountId
   accountStore.currentAccount = account
+  if (isMobile.value) uiStore.accountShow = false
 }
 
 function add() {
@@ -554,6 +563,10 @@ path[fill="#ffdda1"] {
 
     .add {
       margin-left: 2px;
+    }
+
+    .mailbox-close {
+      margin-left: auto;
     }
 
     .head-opt:not(.add) .refresh {
