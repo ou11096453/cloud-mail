@@ -1,5 +1,5 @@
 <template>
-  <div class="email-container" :class="{ 'has-mailbox-header': showAccountIcon }">
+  <div class="email-container" :class="{ 'has-mailbox-header': showAccountIcon }" :aria-busy="loading || refreshing">
     <div v-if="showAccountIcon" class="mailbox-header">
       <div class="mailbox-identity">
         <button v-if="canSwitchAccount" type="button" class="mailbox-switcher"
@@ -32,7 +32,7 @@
       <div class="header-left" :style="'padding-left:' + actionLeft">
 
         <slot name="first"></slot>
-        <button type="button" class="icon-button reload" :aria-label="$t('refresh')" :title="$t('refresh')" @click="refresh">
+        <button type="button" class="icon-button reload" :aria-label="$t('refresh')" :title="$t('refresh')" :disabled="refreshing" @click="refresh">
           <Icon icon="ion:reload" width="18"/>
         </button>
         <button v-perm="'email:delete'" type="button" class="icon-button delete" v-if="checkedEmailCount > 0"
@@ -169,7 +169,7 @@
       </div>
       <div v-if="loadError && !loading" class="load-error" role="status">
         <span>{{ $t('loadFailed') }}</span>
-        <el-button @click="getEmailList(emailList.length === 0)">{{ $t('retry') }}</el-button>
+        <el-button @click="retryList">{{ $t('retry') }}</el-button>
       </div>
     </div>
     <el-dropdown
@@ -337,6 +337,7 @@ const accountStore = useAccountStore()
 const uiStore = useUiStore();
 const emailStore = useEmailStore();
 const loading = ref(false);
+const refreshing = ref(false);
 const followLoading = ref(false);
 const noLoading = ref(false);
 const emailList = reactive([])
@@ -350,6 +351,7 @@ let scrollTop = 0
 const latestEmail = ref(null)
 const scrollbarRef = ref(null)
 let listRequest = null
+let failedListRequest = null
 const isMobile = useMediaQuery('(max-width: 1366px)')
 const loadError = ref(false)
 let disposed = false
@@ -586,15 +588,16 @@ const currentMailboxEmail = computed(() => accountStore.currentAccount?.email ||
 const currentMailboxLabel = computed(() => currentMailboxEmail.value || t('emailAccount'))
 
 function htmlToText(email) {
+  if (email.text) {
+    const text = cleanSpace(email.text)
+    if (text) return text
+  }
+
   if (email.content) {
     return cleanSpace(emailHtmlToText(email.content))
   }
 
-  if (email.text) {
-    return cleanSpace(email.text)
-  } else {
-    return ''
-  }
+  return ''
 
 }
 
@@ -826,7 +829,7 @@ function jumpDetails(email) {
 }
 
 
-async function getEmailList(refresh = false) {
+async function getEmailList(refresh = false, preserveItems = false) {
 
   if (disposed) return
   if (!refresh && (listRequest || loading.value || noLoading.value)) return
@@ -838,19 +841,24 @@ async function getEmailList(refresh = false) {
   const isCurrentRequest = () => !disposed && listRequest === request && !request.signal.aborted
 
   let emailId = emailList.length > 0 ? emailList.at(-1).emailId : 0;
+  const keepVisible = refresh && preserveItems && emailList.length > 0
 
   loadError.value = false
+  failedListRequest = null
+  refreshing.value = refresh
 
   if (refresh) {
-    getSkeletonRows()
-    emailList.length = 0
-    latestEmail.value = null
-    total.value = 0
-    noLoading.value = false
+    if (!keepVisible) {
+      getSkeletonRows()
+      emailList.length = 0
+      latestEmail.value = null
+      total.value = 0
+      noLoading.value = false
+      scrollTop = 0
+    }
     followLoading.value = false
     emailId = 0
-    loading.value = true
-    scrollTop = 0
+    loading.value = !keepVisible
   }
 
   if (emailList.length === 0) {
@@ -869,28 +877,29 @@ async function getEmailList(refresh = false) {
     }));
 
 
+    handleList(list);
     if (refresh) {
       emailList.length = 0
+      scrollTop = 0
     }
-
     latestEmail.value = data.latestEmail
-
-    handleList(list);
     emailList.push(...list);
     noLoading.value = props.type === 'draft' || data.list.length < queryParam.size;
     total.value = data.total ?? emailList.length;
   } catch {
     if (!isCurrentRequest()) return
     loadError.value = true
+    failedListRequest = { refresh, preserveItems }
     firstLoad.value = false
   } finally {
     if (!isCurrentRequest()) return
     loading.value = false
+    refreshing.value = false
     followLoading.value = false
     await nextTick()
     if (!isCurrentRequest()) return
     listRequest = null
-    if (refresh) scrollbarRef.value?.scrollTo(0)
+    if (refresh && !loadError.value) scrollbarRef.value?.scrollTo(0)
     measureScroll()
     if (!loadError.value && arrivedState.bottom) loadData()
   }
@@ -920,13 +929,22 @@ function handleList(list) {
 
 function refresh() {
   emit('refresh-before')
-  refreshList()
+  refreshList(props.type === 'email')
 }
 
-function refreshList() {
+function refreshList(preserveItems = false) {
   checkAll.value = false;
   isIndeterminate.value = false;
-  getEmailList(true);
+  if (preserveItems) emailList.forEach(item => item.checked = false)
+  getEmailList(true, preserveItems);
+}
+
+function retryList() {
+  if (failedListRequest) {
+    getEmailList(failedListRequest.refresh, failedListRequest.preserveItems)
+  } else {
+    getEmailList(emailList.length === 0)
+  }
 }
 
 function loadData() {

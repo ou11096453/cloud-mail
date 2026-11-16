@@ -65,6 +65,7 @@ function mountList(t, type = 'email', options = {}) {
     const copiedTexts = [];
     const messages = [];
     const copyErrors = [];
+    const htmlParses = [];
     const arrivedState = vue.reactive({ bottom: false });
     const scrollMeasure = { bottom: false, calls: 0 };
     const timers = { pause: 0, resume: 0 };
@@ -91,7 +92,10 @@ function mountList(t, type = 'email', options = {}) {
             pause: () => timers.pause++,
             resume: () => timers.resume++,
         }),
-        emailHtmlToText: value => value,
+        emailHtmlToText: value => {
+            htmlParses.push(value);
+            return options.htmlToText ? options.htmlToText(value) : value;
+        },
     };
     const component = createComponent(
         ...bindings.map(binding => vue[binding.imported] ?? mocks[binding.local] ?? {}),
@@ -120,8 +124,46 @@ function mountList(t, type = 'email', options = {}) {
         app.unmount();
     };
     t.after(unmount);
-    return { api: vm.$.exposed, state: vm.$.setupState, instance: vm.$, requests, arrivedState, scrollMeasure, timers, unmount, accountState, uiState, copiedTexts, messages, copyErrors };
+    return { api: vm.$.exposed, state: vm.$.setupState, instance: vm.$, requests, arrivedState, scrollMeasure, timers, unmount, accountState, uiState, copiedTexts, messages, copyErrors, htmlParses };
 }
+
+test('plain-text previews avoid parsing large HTML bodies while retaining the complete message', async t => {
+    const { api, requests, htmlParses } = mountList(t);
+    const content = '<table><tr><td>Large HTML message</td></tr></table>'.repeat(5000);
+    const list = Array.from({ length: 50 }, (_, index) => ({
+        emailId: 100 - index, content, text: '  Plain text\n preview \u200B' + index, createTime: 1,
+    }));
+    requests[0].resolve({ list, total: 50, latestEmail: list[0] });
+    await vue.nextTick();
+    await vue.nextTick();
+    assert.equal(htmlParses.length, 0);
+    assert.equal(api.emailList[0].formatText, 'Plain text preview 0');
+    assert.equal(api.emailList[49].formatText, 'Plain text preview 49');
+    assert.equal(api.emailList[0].content, content);
+    assert.equal(api.emailList[0].text, list[0].text);
+});
+
+test('previews fall back to HTML when plain text is empty or whitespace-only', async t => {
+    const { api, requests, htmlParses } = mountList(t, 'email', { htmlToText: () => '  HTML\n preview  ' });
+    const list = ['', ' \n\u200B', undefined].map((text, index) => ({
+        emailId: 3 - index, content: '<p>HTML preview</p>', text, createTime: 1,
+    }));
+    requests[0].resolve({ list, total: 3, latestEmail: list[0] });
+    await vue.nextTick();
+    await vue.nextTick();
+    assert.equal(htmlParses.length, 3);
+    assert.deepEqual(api.emailList.map(item => item.formatText), ['HTML preview', 'HTML preview', 'HTML preview']);
+});
+
+test('polled messages use plain-text previews and empty messages stay empty', async t => {
+    const { api, requests, htmlParses } = mountList(t);
+    await complete(requests[0], [1]);
+    api.addItem({ emailId: 2, text: 'Fresh\n message', content: '<p>Fresh message</p>', createTime: 1 });
+    api.addItem({ emailId: 3, text: ' \n\u200B', createTime: 1 });
+    assert.equal(api.emailList[0].formatText, '');
+    assert.equal(api.emailList[1].formatText, 'Fresh message');
+    assert.equal(htmlParses.length, 0);
+});
 
 test('mailbox copy uses the current full address without toggling the switcher', async t => {
     const firstEmail = 'first-long-mailbox-address@example.test';
@@ -229,6 +271,85 @@ test('pagination is locked while loading and refresh can supersede it', async t 
     await complete(requests[2], [5]);
     await complete(requests[1], [50]);
     assert.deepEqual(api.emailList.map(item => item.emailId), [5]);
+});
+
+test('manual inbox refresh keeps the current messages visible until replacement succeeds', async t => {
+    const { api, state, requests } = mountList(t);
+    await complete(requests[0], Array.from({ length: 50 }, (_, i) => 100 - i), 100);
+    const first = api.emailList[0];
+    first.checked = true;
+    state.refresh();
+    assert.equal(requests[1].emailId, 0);
+    assert.equal(state.loading, false);
+    assert.equal(state.refreshing, true);
+    assert.equal(api.emailList[0], first);
+    assert.equal(first.checked, false);
+    assert.equal(api.total.value, 100);
+    state.loadData();
+    assert.equal(requests.length, 2);
+    await complete(requests[1], [4, 3, 2], 3);
+    assert.deepEqual(api.emailList.map(item => item.emailId), [4, 3, 2]);
+    assert.equal(state.refreshing, false);
+    assert.equal(api.total.value, 3);
+});
+
+test('failed manual refresh retains messages and retries from the first page', async t => {
+    const { api, state, requests } = mountList(t);
+    await complete(requests[0], [3, 2], 2);
+    const scrolledTo = [];
+    state.scrollbarRef = { scrollTo: index => scrolledTo.push(index) };
+    state.refresh();
+    requests[1].reject(new Error('offline'));
+    await vue.nextTick();
+    await vue.nextTick();
+    assert.deepEqual(api.emailList.map(item => item.emailId), [3, 2]);
+    assert.equal(state.loadError, true);
+    assert.equal(state.refreshing, false);
+    assert.deepEqual(scrolledTo, []);
+    state.retryList();
+    assert.equal(requests[2].emailId, 0);
+    assert.equal(state.loading, false);
+    assert.equal(state.loadError, false);
+    await complete(requests[2], []);
+    assert.equal(api.emailList.length, 0);
+    assert.equal(api.total.value, 0);
+    assert.deepEqual(scrolledTo, [0]);
+});
+
+test('mailbox changes clear visible messages and supersede a pending manual refresh', async t => {
+    const { api, state, requests } = mountList(t);
+    await complete(requests[0], [3, 2], 2);
+    state.refresh();
+    api.refreshList();
+    assert.equal(requests[1].signal.aborted, true);
+    assert.equal(api.emailList.length, 0);
+    assert.equal(state.loading, true);
+    await complete(requests[2], [9]);
+    await complete(requests[1], [4, 3, 2]);
+    assert.deepEqual(api.emailList.map(item => item.emailId), [9]);
+    assert.equal(state.refreshing, false);
+});
+
+test('manual refresh still clears non-inbox views that may reset their filters', async t => {
+    const { api, state, requests } = mountList(t, 'all-email');
+    await complete(requests[0], [3, 2], 2);
+    state.refresh();
+    assert.equal(api.emailList.length, 0);
+    assert.equal(state.loading, true);
+    await complete(requests[1], [9]);
+});
+
+test('retrying failed pagination keeps its existing cursor', async t => {
+    const { api, state, requests } = mountList(t);
+    await complete(requests[0], Array.from({ length: 50 }, (_, i) => 100 - i), 100);
+    state.loadData();
+    requests[1].reject(new Error('offline'));
+    await vue.nextTick();
+    await vue.nextTick();
+    state.retryList();
+    assert.equal(requests[2].emailId, 51);
+    await complete(requests[2], [50]);
+    assert.equal(api.emailList.length, 51);
 });
 
 test('a failed request can be retried and exhausted lists can be refreshed', async t => {
