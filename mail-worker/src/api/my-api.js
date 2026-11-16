@@ -4,7 +4,7 @@ import result from '../model/result';
 import userContext from '../security/user-context';
 
 app.get('/my/loginUserInfo', async (c) => {
-	const user = await userService.loginUserInfo(c, userContext.getUserId(c));
+	const user = await userService.loginUserInfo(c, userContext.getUserId(c), c.req.query('accountId'));
 	return c.json(result.ok(user));
 });
 

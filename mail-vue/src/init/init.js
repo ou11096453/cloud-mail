@@ -26,15 +26,16 @@ export async function init() {
     let setting = null;
 
     if (token) {
-        const [s, user] = await Promise.all([websiteConfig(), loginUserInfo()]);
+        const [s, user] = await Promise.all([websiteConfig(), loginUserInfo(accountStore.currentAccountId)]);
         setting = s;
         settingStore.settings = setting;
         settingStore.domainList = setting.domainList;
         document.title = setting.title;
 
         if (user) {
-            accountStore.currentAccountId = user.account.accountId;
-            accountStore.currentAccount = user.account;
+            const currentAccount = setting.manyEmail === 0 ? (user.currentAccount || user.account) : user.account;
+            accountStore.currentAccountId = currentAccount.accountId;
+            accountStore.currentAccount = currentAccount;
             userStore.user = user;
 
             const routers = permsToRouter(user.permKeys);

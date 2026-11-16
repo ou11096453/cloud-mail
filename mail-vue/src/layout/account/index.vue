@@ -330,6 +330,9 @@ function remove(account) {
     accountDelete(account.accountId).then(() => {
       const index = accounts.findIndex(item => item.accountId === account.accountId);
       accounts.splice(index, 1);
+      if (accountStore.currentAccountId === account.accountId) {
+        changeAccount(accounts.find(item => item.accountId === userStore.user.account.accountId) || userStore.user.account)
+      }
       if (accounts.length < queryParams.size) {
         getAccountList()
       }
@@ -429,8 +432,11 @@ function getAccountList() {
     if (list.length < queryParams.size) {
       noLoading.value = true
     }
-    if (accounts.length === 0 && list.length > 0) {
-      accountStore.currentAccount = list[0]
+    const selectedAccount = list.find(item => item.accountId === accountStore.currentAccountId)
+    if (selectedAccount) {
+      accountStore.currentAccount = selectedAccount
+    } else if (!accountStore.currentAccountId && accounts.length === 0 && list.length > 0) {
+      changeAccount(list[0])
     }
 
     accounts.push(...list)

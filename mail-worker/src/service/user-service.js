@@ -21,7 +21,7 @@ import oauthService from "./oauth-service";
 
 const userService = {
 
-	async loginUserInfo(c, userId) {
+	async loginUserInfo(c, userId, selectedAccountId) {
 
 		const userRow = await userService.selectById(c, userId);
 
@@ -48,6 +48,16 @@ const userService = {
 		if (c.env.admin === userRow.email) {
 			user.role = constant.ADMIN_ROLE
 			user.type = 0;
+		}
+
+		user.currentAccount = account;
+		const accountId = Number(selectedAccountId);
+		if (Number.isSafeInteger(accountId) && accountId > 0 && accountId !== account.accountId &&
+			(permKeys.includes('*') || permKeys.includes('account:query'))) {
+			const selectedAccount = await accountService.selectById(c, accountId);
+			if (selectedAccount?.userId === user.userId) {
+				user.currentAccount = selectedAccount;
+			}
 		}
 
 		return user;

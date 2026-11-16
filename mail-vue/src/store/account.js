@@ -5,5 +5,8 @@ export const useAccountStore = defineStore('account', {
         currentAccountId: 0,
         currentAccount: {},
         changeUserAccountName: ''
-    })
+    }),
+    persist: {
+        pick: ['currentAccountId'],
+    },
 })
