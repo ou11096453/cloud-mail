@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as vue from 'vue';
-import { parse, compileScript, babelParse } from 'vue/compiler-sfc';
+import { parse, compileScript, compileTemplate, babelParse } from 'vue/compiler-sfc';
 
 const source = readFileSync(new URL('../src/components/email-scroll/index.vue', import.meta.url), 'utf8');
 const { descriptor } = parse(source);
@@ -17,7 +17,33 @@ const bindings = imports.flatMap(node => node.specifiers.map(specifier => ({
     local: specifier.local.name,
     imported: specifier.imported?.name ?? 'default',
 })));
-const createComponent = new Function(...bindings.map(binding => binding.local), 'DOMRect', 'window', 'requestAnimationFrame', setupSource + '\nreturn component;');
+const createComponent = new Function(...bindings.map(binding => binding.local), 'DOMRect', 'window', 'requestAnimationFrame', 'navigator', 'ElMessage', 'console', setupSource + '\nreturn component;');
+
+const header = descriptor.template.ast.children[0].children.find(node =>
+    node.type === 1 && node.props.some(prop => prop.name === 'class' && prop.value?.content === 'mailbox-header'));
+const compiledHeader = compileTemplate({ source: header.loc.source, filename: 'email-scroll.vue', id: 'mailbox-header-test' }).code;
+const headerImports = babelParse(compiledHeader, { sourceType: 'module' }).program.body.filter(node => node.type === 'ImportDeclaration');
+let headerSource = compiledHeader;
+for (const node of [...headerImports].reverse()) {
+    headerSource = headerSource.slice(0, node.start) + headerSource.slice(node.end);
+}
+headerSource = headerSource.replace('export function render', 'function render');
+const headerBindings = headerImports.flatMap(node => node.specifiers);
+const renderHeader = new Function(...headerBindings.map(binding => binding.local.name), headerSource + '\nreturn render;')(
+    ...headerBindings.map(binding => binding.imported.name === 'resolveComponent' ? name => name : vue[binding.imported.name]),
+);
+
+function findNode(node, className) {
+    if (node?.props?.class?.split(' ').includes(className)) return node;
+    for (const child of Array.isArray(node?.children) ? node.children : []) {
+        const match = findNode(child, className);
+        if (match) return match;
+    }
+}
+
+function mailboxHeader(state) {
+    return renderHeader({ ...state, showAccountIcon: true, $t: value => value }, []);
+}
 
 const renderer = vue.createRenderer({
     createElement: () => ({}),
@@ -32,16 +58,21 @@ const renderer = vue.createRenderer({
     patchProp() {},
 });
 
-function mountList(t, type = 'email') {
+function mountList(t, type = 'email', options = {}) {
     const requests = [];
+    const accountState = vue.reactive({ currentAccount: options.account });
+    const uiState = vue.reactive({ accountShow: false });
+    const copiedTexts = [];
+    const messages = [];
+    const copyErrors = [];
     const arrivedState = vue.reactive({ bottom: false });
     const scrollMeasure = { bottom: false, calls: 0 };
     const timers = { pause: 0, resume: 0 };
     const mocks = {
         useEmailStore: () => vue.reactive({}),
-        useAccountStore: () => vue.reactive({}),
-        useUiStore: () => vue.reactive({}),
-        useSettingStore: () => vue.reactive({ settings: {} }),
+        useAccountStore: () => accountState,
+        useUiStore: () => uiState,
+        useSettingStore: () => vue.reactive({ settings: { manyEmail: options.manyEmail ?? 0 } }),
         hasPerm: () => true,
         fromNow: value => String(value),
         useI18n: () => ({ t: value => value }),
@@ -65,6 +96,11 @@ function mountList(t, type = 'email') {
     const component = createComponent(
         ...bindings.map(binding => vue[binding.imported] ?? mocks[binding.local] ?? {}),
         { fromRect: value => value }, {}, callback => callback(),
+        { clipboard: { writeText: async text => {
+            if (options.clipboardError) throw options.clipboardError;
+            copiedTexts.push(text);
+        } } },
+        message => messages.push(message), { error: (...args) => copyErrors.push(args) },
     );
     component.render = () => null;
     const app = renderer.createApp(component, {
@@ -84,8 +120,64 @@ function mountList(t, type = 'email') {
         app.unmount();
     };
     t.after(unmount);
-    return { api: vm.$.exposed, state: vm.$.setupState, instance: vm.$, requests, arrivedState, scrollMeasure, timers, unmount };
+    return { api: vm.$.exposed, state: vm.$.setupState, instance: vm.$, requests, arrivedState, scrollMeasure, timers, unmount, accountState, uiState, copiedTexts, messages, copyErrors };
 }
+
+test('mailbox copy uses the current full address without toggling the switcher', async t => {
+    const firstEmail = 'first-long-mailbox-address@example.test';
+    const { state, accountState, uiState, copiedTexts, messages } = mountList(t, 'email', { account: { email: firstEmail } });
+    const header = mailboxHeader(state);
+    const identity = findNode(header, 'mailbox-identity');
+    const copy = findNode(header, 'mailbox-copy');
+    const switcher = findNode(header, 'mailbox-switcher');
+    assert.ok(identity.children.includes(copy));
+    assert.ok(identity.children.includes(switcher));
+    assert.equal(findNode(switcher, 'mailbox-copy'), undefined);
+    assert.equal(copy.props.disabled, false);
+    assert.equal(copy.props['aria-label'], `copy: ${firstEmail}`);
+    assert.equal(copy.props.title, 'copy');
+    await copy.props.onClick();
+    assert.deepEqual(copiedTexts, [firstEmail]);
+    assert.equal(uiState.accountShow, false);
+    assert.equal(messages[0].type, 'success');
+    switcher.props.onClick();
+    assert.equal(uiState.accountShow, true);
+    accountState.currentAccount = { email: 'second@example.test' };
+    await findNode(mailboxHeader(state), 'mailbox-copy').props.onClick();
+    assert.deepEqual(copiedTexts, [firstEmail, 'second@example.test']);
+    assert.equal(uiState.accountShow, true);
+});
+
+test('mailbox copy is disabled when there is no address and never copies the placeholder', async t => {
+    const { state, copiedTexts, messages } = mountList(t);
+    const copy = findNode(mailboxHeader(state), 'mailbox-copy');
+    assert.equal(state.currentMailboxLabel, 'emailAccount');
+    assert.equal(copy.props.disabled, true);
+    await copy.props.onClick();
+    assert.deepEqual(copiedTexts, []);
+    assert.deepEqual(messages, []);
+});
+
+test('mailbox copy works when switching is unavailable and reports clipboard failures', async t => {
+    const error = new Error('Clipboard access denied');
+    const { state, uiState, messages, copyErrors } = mountList(t, 'email', {
+        account: { email: 'only@example.test' }, manyEmail: 1, clipboardError: error,
+    });
+    const header = mailboxHeader(state);
+    assert.equal(findNode(header, 'mailbox-switcher'), undefined);
+    assert.ok(findNode(header, 'mailbox-current'));
+    await findNode(header, 'mailbox-copy').props.onClick();
+    assert.equal(uiState.accountShow, false);
+    assert.deepEqual(messages, [{ message: 'copyFailMsg', type: 'error', plain: true }]);
+    assert.equal(copyErrors[0][1], error);
+});
+
+test('the shared clipboard action still copies verification codes', async t => {
+    const { state, copiedTexts, messages } = mountList(t);
+    await state.copyText('012345');
+    assert.deepEqual(copiedTexts, ['012345']);
+    assert.equal(messages[0].message, 'copySuccessMsg');
+});
 
 const message = emailId => ({ emailId, text: `Message ${emailId}`, createTime: 1 });
 async function complete(request, ids, total = ids.length) {

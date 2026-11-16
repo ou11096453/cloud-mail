@@ -1,15 +1,22 @@
 <template>
   <div class="email-container" :class="{ 'has-mailbox-header': showAccountIcon }">
     <div v-if="showAccountIcon" class="mailbox-header">
-      <button v-if="canSwitchAccount" type="button" class="mailbox-switcher"
-              :aria-label="$t('switchMailbox') + ': ' + currentMailboxLabel"
-              :title="$t('switchMailbox')" :aria-expanded="accountShow"
-              aria-controls="mailbox-panel" @click="changeAccountShow">
-        <Icon icon="akar-icons:dot-grid-fill" width="18" height="18" aria-hidden="true"/>
-        <span class="mailbox-address" :title="currentMailboxLabel" translate="no">{{ currentMailboxLabel }}</span>
-      </button>
-      <div v-else class="mailbox-current">
-        <span class="mailbox-address" :title="currentMailboxLabel" translate="no">{{ currentMailboxLabel }}</span>
+      <div class="mailbox-identity">
+        <button v-if="canSwitchAccount" type="button" class="mailbox-switcher"
+                :aria-label="$t('switchMailbox') + ': ' + currentMailboxLabel"
+                :title="$t('switchMailbox')" :aria-expanded="accountShow"
+                aria-controls="mailbox-panel" @click="changeAccountShow">
+          <Icon icon="akar-icons:dot-grid-fill" width="18" height="18" aria-hidden="true"/>
+          <span class="mailbox-address" :title="currentMailboxLabel" translate="no">{{ currentMailboxLabel }}</span>
+        </button>
+        <div v-else class="mailbox-current">
+          <span class="mailbox-address" :title="currentMailboxLabel" translate="no">{{ currentMailboxLabel }}</span>
+        </div>
+        <button type="button" class="icon-button mailbox-copy"
+                :aria-label="$t('copy') + ': ' + currentMailboxLabel" :title="$t('copy')"
+                :disabled="!currentMailboxEmail" @click="copyText(currentMailboxEmail)">
+          <Icon icon="fluent-color:clipboard-24" width="20" height="20" aria-hidden="true"/>
+        </button>
       </div>
       <span class="email-count" v-if="total">{{ $t('emailCount', {total: total}) }}</span>
     </div>
@@ -102,7 +109,7 @@
                   <div class="email-text">
                     <span class="email-subject" :style="(item.unread === EmailUnreadEnum.UNREAD && showUnread)  ? 'font-weight: bold' : ''">
                       <div class="unread" v-if="!isMobile && (item.unread === EmailUnreadEnum.UNREAD && showUnread) "/>
-                      <span v-if="item.code" class="code-tag" @click.stop="copyCode(item.code)">[{{ t('codeLabel') }}{{ item.code }}]</span>
+                      <span v-if="item.code" class="code-tag" @click.stop="copyText(item.code)">[{{ t('codeLabel') }}{{ item.code }}]</span>
                       <span class="subject-text">
                         <slot name="subject" :email="item" >
                           {{ item.subject || '\u200B' }}
@@ -179,7 +186,7 @@
     >
       <template #dropdown>
         <el-dropdown-menu>
-          <el-dropdown-item v-if="rightClickEmail.code" @click="copyCode(rightClickEmail.code)" >
+          <el-dropdown-item v-if="rightClickEmail.code" @click="copyText(rightClickEmail.code)" >
             <template #default>
               <div class="right-dropdown-item">
                 <Icon icon="fluent-color:clipboard-24" width="20" height="20" />
@@ -575,7 +582,8 @@ function getSkeletonRows() {
 
 const canSwitchAccount = computed(() => props.showAccountIcon && hasPerm('account:query') && settingStore.settings.manyEmail === 0)
 const accountShow = computed(() => canSwitchAccount.value && uiStore.accountShow)
-const currentMailboxLabel = computed(() => accountStore.currentAccount?.email || t('emailAccount'))
+const currentMailboxEmail = computed(() => accountStore.currentAccount?.email || '')
+const currentMailboxLabel = computed(() => currentMailboxEmail.value || t('emailAccount'))
 
 function htmlToText(email) {
   if (email.content) {
@@ -677,9 +685,10 @@ function handleSearch(type, value) {
   emit('right-search', type, value);
 }
 
-async function copyCode(code) {
+async function copyText(text) {
+  if (!text) return
   try {
-    await navigator.clipboard.writeText(code);
+    await navigator.clipboard.writeText(text);
     ElMessage({
       message: t('copySuccessMsg'),
       type: 'success',
@@ -952,6 +961,13 @@ function loadData() {
   min-height: 48px;
   padding: 2px max(8px, env(safe-area-inset-right)) 2px max(8px, env(safe-area-inset-left));
   border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.mailbox-identity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 .mailbox-switcher,
