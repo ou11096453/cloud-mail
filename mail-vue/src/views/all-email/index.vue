@@ -292,8 +292,8 @@ function jumpContent(email) {
 }
 
 
-function getEmailList(emailId, size) {
-  return allEmailList({emailId, size, ...params})
+function getEmailList(emailId, size, signal) {
+  return allEmailList({emailId, size, ...params}, signal)
 }
 
 let disposed = false

@@ -260,7 +260,7 @@
 <script setup>
 import {Icon} from "@iconify/vue";
 import skeletonBlock from "@/components/email-scroll/skeleton/index.vue"
-import {computed, onActivated, reactive, ref, watch, nextTick, onMounted, onUnmounted } from "vue";
+import {computed, onActivated, onDeactivated, reactive, ref, watch, nextTick, onUnmounted } from "vue";
 import {useEmailStore} from "@/store/email.js";
 import {useAccountStore} from "@/store/account.js";
 import {useUiStore} from "@/store/ui.js";
@@ -270,7 +270,7 @@ import {fromNow} from "@/utils/day.js";
 import {useI18n} from "vue-i18n";
 import {EmailUnreadEnum} from "@/enums/email-enum.js";
 import { UseVirtualList } from '@vueuse/components'
-import { useScroll, useMediaQuery, useEventListener } from '@vueuse/core'
+import { useScroll, useMediaQuery, useEventListener, useIntervalFn, useResizeObserver } from '@vueuse/core'
 import { emailHtmlToText } from '@/utils/email-html.js'
 
 const props = defineProps({
@@ -342,10 +342,9 @@ const firstLoad = ref(true)
 let scrollTop = 0
 const latestEmail = ref(null)
 const scrollbarRef = ref(null)
-let reqLock = false
+let listRequest = null
 const isMobile = useMediaQuery('(max-width: 1366px)')
 const loadError = ref(false)
-let pendingRefresh = false
 let disposed = false
 let skeletonRows = 0
 const timePaddingRight = ref('');
@@ -355,7 +354,6 @@ const dropdownCloseLock = ref(false);
 const dropdownShow = ref(false);
 const rightClickEmail = ref({});
 const checkedEmailCount = ref(0);
-let timer = null
 const position = ref(
     DOMRect.fromRect({
       x: 0,
@@ -385,34 +383,38 @@ defineExpose({
   total
 })
 
+const { pause: pauseTimeUpdates, resume: resumeTimeUpdates } = useIntervalFn(updateTimes, 60 * 1000)
+
 onActivated(() => {
+  updateTimes()
+  resumeTimeUpdates()
   requestAnimationFrame(() => {
     const index = scrollTop / itemHeight.value
     scrollbarRef.value?.scrollTo(index);
   })
 })
 
-onMounted(() => {
-  timer = setInterval(() => {
-    emailList.forEach(email => {
-      email.formatCreateTime = fromNow(email.createTime);
-    })
-  }, 1000 * 60);
-})
+onDeactivated(pauseTimeUpdates)
 
 onUnmounted(() => {
-  clearInterval(timer)
   disposed = true
+  listRequest?.abort()
 })
 
 getEmailList()
+
+function updateTimes() {
+  emailList.forEach(email => {
+    email.formatCreateTime = fromNow(email.createTime);
+  })
+}
 
 function onScroll(e) {
   scrollTop = e.target.scrollTop;
 }
 
 const virtualContainer = computed(() => scrollbarRef.value?.$el)
-const { arrivedState } = useScroll(virtualContainer, {
+const { arrivedState, measure: measureScroll } = useScroll(virtualContainer, {
   offset: { bottom: 1200 }
 })
 
@@ -429,13 +431,10 @@ const itemHeight = computed(() => {
     }
 })
 
-watch(emailList, () => {
-  updateHasScrollbar();
-})
+watch(() => emailList.length, updateHasScrollbar, { flush: 'post' })
 
-watch(scrollbarRef, () => {
-  updateHasScrollbar();
-})
+watch(scrollbarRef, updateHasScrollbar, { flush: 'post' })
+useResizeObserver(virtualContainer, updateHasScrollbar)
 
 // 强制刷新 (itemHeight 更改后虚拟滚动列表不会自己更新)
 watch(itemHeight, async (height, previousHeight) => {
@@ -481,8 +480,7 @@ watch(
     () => emailList.map(item => item.checked),
     () => {
       updateCheckStatus();
-    },
-    {deep: true}
+    }
 );
 
 
@@ -558,7 +556,7 @@ const handleContextmenu = (event, email) => {
 
 function updateHasScrollbar() {
   nextTick(() => {
-    const doc = document.querySelector('.virtual');
+    const doc = virtualContainer.value;
     if (doc) {
       if (doc.scrollHeight > doc.clientHeight) {
         timePaddingRight.value = '5px';
@@ -637,11 +635,11 @@ async function emailRead(emailId) {
 }
 
 function localRead(emailIds) {
-  emailIds.forEach(emailId => {
-    const index = emailList.findIndex(email => email.emailId === emailId);
-    if (index > -1) {
-      emailList[index].unread = EmailUnreadEnum.READ;
-      emailList[index].checked = false;
+  const ids = new Set(emailIds)
+  emailList.forEach(email => {
+    if (ids.has(email.emailId)) {
+      email.unread = EmailUnreadEnum.READ;
+      email.checked = false;
     }
   })
 }
@@ -724,13 +722,11 @@ function handleDelete() {
 
 function deleteEmail(emailIds) {
   const previousCount = emailList.length
-  emailIds.forEach(emailId => {
-    emailList.forEach((item, index) => {
-      if (emailId === item.emailId) {
-        emailList.splice(index, 1);
-      }
-    })
-  })
+  const ids = new Set(emailIds)
+  const remaining = emailList.filter(item => !ids.has(item.emailId))
+  if (remaining.length !== previousCount) {
+    emailList.splice(0, previousCount, ...remaining)
+  }
   total.value = Math.max(0, total.value - (previousCount - emailList.length))
   if (emailList.length < queryParam.size && !noLoading.value) {
     getEmailList()
@@ -823,28 +819,26 @@ function jumpDetails(email) {
 
 async function getEmailList(refresh = false) {
 
-  if (reqLock) {
-    pendingRefresh ||= refresh
-    return
-  }
+  if (disposed) return
+  if (!refresh && (listRequest || loading.value || noLoading.value)) return
+
+  // Refresh supersedes pagination or an older mailbox/sort request.
+  listRequest?.abort()
+  const request = new AbortController()
+  listRequest = request
+  const isCurrentRequest = () => !disposed && listRequest === request && !request.signal.aborted
 
   let emailId = emailList.length > 0 ? emailList.at(-1).emailId : 0;
 
-  reqLock = true
   loadError.value = false
 
-  if (!refresh) {
-
-    if (loading.value || noLoading.value) {
-      reqLock = false
-      return
-    }
-
-  } else {
+  if (refresh) {
     getSkeletonRows()
     emailList.length = 0
     latestEmail.value = null
     total.value = 0
+    noLoading.value = false
+    followLoading.value = false
     emailId = 0
     loading.value = true
     scrollTop = 0
@@ -856,8 +850,8 @@ async function getEmailList(refresh = false) {
     followLoading.value = !refresh;
   }
   try {
-    const data = await props.getEmailList(emailId, queryParam.size)
-    if (disposed || pendingRefresh) return
+    const data = await props.getEmailList(emailId, queryParam.size, request.signal)
+    if (!isCurrentRequest()) return
     firstLoad.value = false
 
     let list = data.list.map(item => ({
@@ -877,36 +871,36 @@ async function getEmailList(refresh = false) {
     noLoading.value = props.type === 'draft' || data.list.length < queryParam.size;
     total.value = data.total ?? emailList.length;
   } catch {
+    if (!isCurrentRequest()) return
     loadError.value = true
     firstLoad.value = false
   } finally {
+    if (!isCurrentRequest()) return
     loading.value = false
     followLoading.value = false
-    reqLock = false
     await nextTick()
+    if (!isCurrentRequest()) return
+    listRequest = null
     if (refresh) scrollbarRef.value?.scrollTo(0)
-    if (pendingRefresh && !disposed) {
-      pendingRefresh = false
-      getEmailList(true)
-    }
+    measureScroll()
+    if (!loadError.value && arrivedState.bottom) loadData()
   }
 }
 
 function handleList(list) {
+  const statusIconMap = {
+    0: { icon: 'ic:round-mark-email-read', color: '#51C76B', content: t('received') },
+    1: { icon: 'bi:send-arrow-up-fill',  color: '#51C76B', content: t('sent') },
+    2: { icon: 'bi:send-check-fill',     color: '#51C76B', content: t('delivered') },
+    3: { icon: 'bi:send-x-fill',         color: '#F56C6C', content: t('bounced') },
+    8: { icon: 'bi:send-x-fill',         color: '#F56C6C', content: t('bounced') },
+    4: { icon: 'bi:send-exclamation-fill', color: '#FBBD08', content: t('complained') },
+    5: { icon: 'bi:send-arrow-up-fill',  color: '#FBBD08', content: t('delayed') },
+    7: { icon: 'ic:round-mark-email-read', color: '#FBBD08', content: t('noRecipient') },
+  };
   list.forEach(email => {
     email.formatText = htmlToText(email)
     email.formatCreateTime = fromNow(email.createTime);
-    email.test = t('received')
-    const statusIconMap = {
-      0: { icon: 'ic:round-mark-email-read', color: '#51C76B', content: t('received') },
-      1: { icon: 'bi:send-arrow-up-fill',  color: '#51C76B', content: t('sent') },
-      2: { icon: 'bi:send-check-fill',     color: '#51C76B', content: t('delivered') },
-      3: { icon: 'bi:send-x-fill',         color: '#F56C6C', content: t('bounced') },
-      8: { icon: 'bi:send-x-fill',         color: '#F56C6C', content: t('bounced') },
-      4: { icon: 'bi:send-exclamation-fill', color: '#FBBD08', content: t('complained') },
-      5: { icon: 'bi:send-arrow-up-fill',  color: '#FBBD08', content: t('delayed') },
-      7: { icon: 'ic:round-mark-email-read', color: '#FBBD08', content: t('noRecipient') },
-    };
 
     if (email.isDel) {
       email.isDelContent = t('selectDeleted');

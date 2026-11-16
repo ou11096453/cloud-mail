@@ -72,7 +72,7 @@ http.interceptors.response.use((res) => {
 
         const noMsg = error.config?.noMsg;
 
-        if (noMsg) {
+        if (noMsg || axios.isCancel(error)) {
             return Promise.reject(error)
         } else if (error.message?.includes('Network Error')) {
             ElMessage({

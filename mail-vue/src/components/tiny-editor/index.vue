@@ -1,5 +1,5 @@
 <template>
-  <div class="editor-box">
+  <div class="editor-box" @focusout="allowEditorUiFocus" @keydown.esc.stop>
     <div class="editor-status" v-if="showLoading || failed" role="status">
       <loading v-if="showLoading"/>
       <el-button v-else @click="initTinyMCE">{{ $t('retry') }}</el-button>
@@ -14,6 +14,7 @@ import loading from "@/components/loading/index.vue";
 import {useI18n} from 'vue-i18n'
 import {useUiStore} from '@/store/ui.js'
 import {useSettingStore} from '@/store/setting.js'
+import {useZIndex} from 'element-plus'
 
 defineExpose({
   clearEditor,
@@ -47,6 +48,26 @@ let focusRequested = false;
 let loader;
 const uiStore = useUiStore();
 const settingStore = useSettingStore();
+const {nextZIndex} = useZIndex();
+
+function raiseEditorUi() {
+  const zIndex = String(nextZIndex());
+  document.querySelectorAll('.tox-tinymce-aux').forEach(sink => {
+    sink.style.zIndex = zIndex;
+    sink.addEventListener('keydown', stopEditorUiEscape);
+  });
+}
+
+function stopEditorUiEscape(event) {
+  if (event.key !== 'Escape') return;
+  event.stopPropagation();
+  editor.value?.windowManager.close();
+}
+
+function allowEditorUiFocus(event) {
+  // TinyMCE portals must retain focus outside the compose dialog's focus trap.
+  if (event.relatedTarget?.closest('.tox-tinymce-aux')) event.stopPropagation();
+}
 
 onMounted(() => {
   initTinyMCE();
@@ -141,12 +162,14 @@ function initEditor(current) {
     noneditable_class: 'mceNonEditable',
     setup: (ed) => {
       editor.value = ed;
+      ed.on('focus click OpenWindow', raiseEditorUi);
       ed.on('init', () => {
         if (disposed || current !== generation) {
           ed.remove();
           return;
         }
         ed.setContent(content.value);
+        raiseEditorUi();
         isInitialized.value = true;
         showLoading.value = false;
         if (focusRequested) ed.focus();
