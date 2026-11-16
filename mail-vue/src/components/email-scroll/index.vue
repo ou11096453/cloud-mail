@@ -966,7 +966,7 @@ function loadData() {
 .mailbox-identity {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -979,7 +979,7 @@ function loadData() {
   min-width: 0;
   max-width: 100%;
   min-height: 44px;
-  padding: 0 10px 0 6px;
+  padding: 0 2px 0 6px;
   color: inherit;
   font-size: 14px;
   font-weight: 600;
