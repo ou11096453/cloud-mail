@@ -746,6 +746,7 @@ function deleteEmail(emailIds) {
 }
 
 function addItem(email) {
+  if (isLatestEmail(email)) latestEmail.value = email
 
   const existIndex = emailList.findIndex(item => item.emailId === email.emailId)
 
@@ -760,10 +761,6 @@ function addItem(email) {
     if (noLoading.value) {
       handleList([email]);
       emailList.push(email);
-    }
-
-    if (!latestEmail.value || email.emailId > latestEmail.value.emailId) {
-      latestEmail.value = email
     }
 
     total.value++
@@ -783,12 +780,14 @@ function addItem(email) {
     }
   }
 
-  if (!latestEmail.value || email.emailId > latestEmail.value.emailId) {
-    latestEmail.value = email
-  }
-
   total.value++
   return true;
+}
+
+function isLatestEmail(email) {
+  if (!latestEmail.value) return true
+  if (email.deliveryId != null) return email.deliveryId > (latestEmail.value.deliveryId ?? 0)
+  return email.emailId > latestEmail.value.emailId
 }
 
 function handleCheckAllChange(val) {
@@ -882,10 +881,11 @@ async function getEmailList(refresh = false, preserveItems = false) {
       emailList.length = 0
       scrollTop = 0
     }
-    latestEmail.value = data.latestEmail
+    const initializeCursor = refresh || !latestEmail.value
+    if (initializeCursor) latestEmail.value = data.latestEmail
     emailList.push(...list);
     noLoading.value = props.type === 'draft' || data.list.length < queryParam.size;
-    total.value = data.total ?? emailList.length;
+    if (initializeCursor) total.value = data.total ?? emailList.length;
   } catch {
     if (!isCurrentRequest()) return
     loadError.value = true

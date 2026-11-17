@@ -9,6 +9,7 @@ import { parseHTML } from 'linkedom';
 import { v4 as uuidv4 } from 'uuid';
 import domainUtils from '../utils/domain-uitls';
 import settingService from "./setting-service";
+import { sleep } from '../utils/time-utils';
 
 const attService = {
 
@@ -27,7 +28,15 @@ const attService = {
 				metadate.cacheControl = `max-age=259200`
 			}
 
-			await r2Service.putObj(c, attachment.key, attachment.content, metadate);
+			for (let attempt = 0; ; attempt++) {
+				try {
+					await r2Service.putObj(c, attachment.key, attachment.content, metadate);
+					break;
+				} catch (error) {
+					if (attempt >= 2) throw error;
+					await sleep(200 * (attempt + 1));
+				}
+			}
 
 		}
 

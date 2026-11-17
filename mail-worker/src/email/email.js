@@ -38,16 +38,8 @@ export async function email(message, env, ctx) {
 			return;
 		}
 
-		const reader = message.raw.getReader();
-		let content = '';
-
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			content += new TextDecoder().decode(value);
-		}
-
-		const email = await PostalMime.parse(content);
+		const raw = await new Response(message.raw).arrayBuffer();
+		const email = await PostalMime.parse(raw);
 
 
 		const blockFlag = checkBlock(blackSubject, blackContent, blackFrom, email);
@@ -136,12 +128,8 @@ export async function email(message, env, ctx) {
 			attachment.accountId = emailRow.accountId;
 		});
 
-		try {
-			if (attachments.length > 0) {
-				await attService.addAtt({ env }, attachments);
-			}
-		} catch (e) {
-			console.error(e);
+		if (attachments.length > 0) {
+			await attService.addAtt({ env }, attachments);
 		}
 
 		emailRow = await emailService.completeReceive({ env }, account ? emailConst.status.RECEIVE : emailConst.status.NOONE, emailRow.emailId);

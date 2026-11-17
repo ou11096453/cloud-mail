@@ -141,7 +141,7 @@
 </template>
 <script setup>
 import {Icon} from "@iconify/vue";
-import {computed, nextTick, reactive, ref, watch} from "vue";
+import {computed, nextTick, onUnmounted, reactive, ref, watch} from "vue";
 import {useMediaQuery} from "@vueuse/core";
 import {
   accountList,
@@ -188,6 +188,8 @@ const botJsError = ref(false)
 let verifyToken = ''
 let verifyErrorCount = 0
 let first = true
+let listRequest = null
+let disposed = false
 const addForm = reactive({
   email: '',
   suffix: settingStore.domainList[0]
@@ -202,6 +204,11 @@ const mySelect = ref()
 if (hasPerm('account:query')) {
   getAccountList()
 }
+
+onUnmounted(() => {
+  disposed = true
+  listRequest?.abort()
+})
 
 watch(() => accountStore.changeUserAccountName, () => {
   const account = accounts.find(item => item.accountId === userStore.user.account.accountId)
@@ -346,9 +353,8 @@ function remove(account) {
 }
 
 function refresh() {
-  if (loading.value) {
-    return
-  }
+  listRequest?.abort()
+  listRequest = null
   loading.value = false
   followLoading.value = false
   noLoading.value = false
@@ -408,7 +414,10 @@ async function copyAccount(account) {
 
 function getAccountList() {
 
-  if (loading.value || followLoading.value || noLoading.value) return;
+  if (disposed || listRequest || loading.value || followLoading.value || noLoading.value) return;
+  const request = new AbortController()
+  listRequest = request
+  const isCurrentRequest = () => !disposed && listRequest === request && !request.signal.aborted
 
   if (accounts.length === 0) {
     loading.value = true
@@ -421,13 +430,14 @@ function getAccountList() {
   const accountId = accounts.length > 0 ? accounts.at(-1).accountId : 0;
   const lastSort = accounts.length > 0 ? accounts.at(-1).sort : null;
 
-  accountList(accountId, queryParams.size, lastSort).then(async list => {
+  accountList(accountId, queryParams.size, lastSort, request.signal).then(async list => {
 
     let end = Date.now();
     let duration = end - start;
     if (duration < 300) {
       await sleep(300 - duration)
     }
+    if (!isCurrentRequest()) return
 
     if (list.length < queryParams.size) {
       noLoading.value = true
@@ -445,8 +455,11 @@ function getAccountList() {
     followLoading.value = false
     first = false
   }).catch(() => {
+    if (!isCurrentRequest()) return
     loading.value = false
     followLoading.value = false
+  }).finally(() => {
+    if (isCurrentRequest()) listRequest = null
   })
 }
 
@@ -510,7 +523,8 @@ function submit() {
     addLoading.value = false
     showAdd.value = false
     addForm.email = ''
-    accounts.push(account)
+    changeAccount(account)
+    refresh()
     verifyToken = ''
     settingStore.settings.addVerifyOpen = account.addVerifyOpen
     ElMessage({

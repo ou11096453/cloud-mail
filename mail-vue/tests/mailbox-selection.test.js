@@ -93,15 +93,15 @@ async function settle() {
     for (let i = 0; i < 8; i++) await vue.nextTick();
 }
 
-function mountSwitcher(t, selected = secondary) {
+function mountSwitcher(t, selected = secondary, options = {}) {
     const accountState = vue.reactive({ currentAccountId: selected?.accountId ?? 0, currentAccount: selected ?? {} });
     const pages = [[primary, secondary]];
     const requests = [];
     const deleted = [];
     const mocks = {
         useAccountStore: () => accountState,
-        useSettingStore: () => vue.reactive({ domainList: ['example.test'], settings: {} }),
-        useUserStore: () => vue.reactive({ user: { userId: 10, account: primary } }),
+        useSettingStore: () => vue.reactive({ domainList: ['@example.test'], settings: { minEmailPrefix: 1, addEmailVerify: 1 } }),
+        useUserStore: () => vue.reactive({ user: { userId: 10, account: primary }, refreshUserInfo() {} }),
         useUiStore: () => vue.reactive({ accountShow: false }),
         useEmailStore: () => ({}),
         useI18n: () => ({ t: value => value }),
@@ -110,8 +110,11 @@ function mountSwitcher(t, selected = secondary) {
         sleep: async () => {},
         accountList: async (...args) => {
             requests.push(args);
+            if (options.list) return options.list(...args);
             return pages.shift() ?? [];
         },
+        accountAdd: async () => options.created ?? { ...secondary, accountId: 61, email: 'new@example.test' },
+        isEmail: () => true,
         accountDelete: async id => deleted.push(id),
         AccountAllReceiveEnum: { DISABLED: 0, ENABLED: 1 },
     };
@@ -163,6 +166,45 @@ test('deleting the selected mailbox falls back to the primary mailbox', async t 
     assert.deepEqual(deleted, [2]);
     assert.equal(accountState.currentAccountId, 1);
     assert.equal(accountState.currentAccount.email, primary.email);
+});
+
+test('creating a mailbox selects it and resets pagination without skipping unloaded accounts', async t => {
+    const firstPage = Array.from({ length: 30 }, (_, i) => ({ ...primary, accountId: i + 1, sort: 0 }));
+    const nextPage = Array.from({ length: 30 }, (_, i) => ({ ...secondary, accountId: i + 31, sort: 0 }));
+    const created = { ...secondary, accountId: 61, sort: 0, email: 'new@example.test' };
+    const { state, accountState, pages, requests } = mountSwitcher(t, primary, { created });
+    await settle();
+    pages.push(firstPage);
+    state.refresh();
+    await settle();
+    pages.push(firstPage, nextPage, [created]);
+    state.addForm.email = 'new';
+    state.submit();
+    await settle();
+    assert.equal(accountState.currentAccountId, 61);
+    assert.equal(accountState.currentAccount.email, created.email);
+    assert.equal(requests.at(-1)[0], 0);
+    state.getAccountList();
+    await settle();
+    assert.equal(requests.at(-1)[0], 30);
+    state.getAccountList();
+    await settle();
+    assert.equal(requests.at(-1)[0], 60);
+    assert.deepEqual(state.accounts.map(item => item.accountId), Array.from({ length: 61 }, (_, i) => i + 1));
+});
+
+test('refresh supersedes an in-flight mailbox request and ignores its late response', async t => {
+    const pending = [];
+    const { state, requests } = mountSwitcher(t, primary, {
+        list: () => new Promise(resolve => pending.push(resolve)),
+    });
+    state.refresh();
+    assert.equal(requests[0][3].aborted, true);
+    pending[1]([primary, secondary]);
+    await settle();
+    pending[0]([{ ...secondary, accountId: 99 }]);
+    await settle();
+    assert.deepEqual(state.accounts.map(item => item.accountId), [1, 2]);
 });
 
 const serviceSource = read('../../mail-worker/src/service/user-service.js');

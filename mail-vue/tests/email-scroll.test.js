@@ -165,6 +165,31 @@ test('polled messages use plain-text previews and empty messages stay empty', as
     assert.equal(htmlParses.length, 0);
 });
 
+test('delivery cursors advance even when an older message finishes after a newer message', async t => {
+    const { api, requests } = mountList(t);
+    await complete(requests[0], [10]);
+    api.addItem({ ...message(12), deliveryId: 1 });
+    api.addItem({ ...message(11), deliveryId: 2 });
+    assert.deepEqual(api.emailList.map(item => item.emailId), [12, 11, 10]);
+    assert.equal(api.latestEmail.value.emailId, 11);
+    assert.equal(api.latestEmail.value.deliveryId, 2);
+    const total = api.total.value;
+    assert.equal(api.addItem({ ...message(12), deliveryId: 3 }), false);
+    assert.equal(api.latestEmail.value.deliveryId, 3);
+    assert.equal(api.total.value, total);
+});
+
+test('twenty-message polling batches retain every delivery and keep display ordering', async t => {
+    const { api, requests } = mountList(t);
+    await complete(requests[0], []);
+    for (let deliveryId = 1; deliveryId <= 25; deliveryId++) {
+        api.addItem({ ...message(deliveryId), deliveryId });
+    }
+    assert.equal(api.emailList.length, 25);
+    assert.equal(api.latestEmail.value.deliveryId, 25);
+    assert.deepEqual(api.emailList.map(item => item.emailId), Array.from({ length: 25 }, (_, i) => 25 - i));
+});
+
 test('mailbox copy uses the current full address without toggling the switcher', async t => {
     const firstEmail = 'first-long-mailbox-address@example.test';
     const { state, accountState, uiState, copiedTexts, messages } = mountList(t, 'email', { account: { email: firstEmail } });
@@ -271,6 +296,27 @@ test('pagination is locked while loading and refresh can supersede it', async t 
     await complete(requests[2], [5]);
     await complete(requests[1], [50]);
     assert.deepEqual(api.emailList.map(item => item.emailId), [5]);
+});
+
+test('loading older pages never advances the polling cursor past unseen new deliveries', async t => {
+    const { api, state, requests } = mountList(t);
+    requests[0].resolve({
+        list: Array.from({ length: 50 }, (_, i) => message(100 - i)), total: 100,
+        latestEmail: { ...message(100), deliveryId: 1 },
+    });
+    await vue.nextTick();
+    await vue.nextTick();
+    state.loadData();
+    requests[1].resolve({ list: [message(50)], total: 101, latestEmail: { ...message(101), deliveryId: 2 } });
+    await vue.nextTick();
+    await vue.nextTick();
+    assert.equal(api.latestEmail.value.deliveryId, 1);
+    assert.equal(api.total.value, 100);
+    assert.equal(api.emailList.some(item => item.emailId === 101), false);
+    api.addItem({ ...message(101), deliveryId: 2 });
+    assert.equal(api.latestEmail.value.deliveryId, 2);
+    assert.equal(api.emailList[0].emailId, 101);
+    assert.equal(api.total.value, 101);
 });
 
 test('manual inbox refresh keeps the current messages visible until replacement succeeds', async t => {

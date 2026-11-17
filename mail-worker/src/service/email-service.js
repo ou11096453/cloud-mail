@@ -22,10 +22,13 @@ import domainUtils from '../utils/domain-uitls';
 import account from "../entity/account";
 import { att } from '../entity/att';
 import telegramService from './telegram-service';
+import { emailDelivery } from '../entity/email-delivery';
+import emailDeliveryService from './email-delivery-service';
 
 const emailService = {
 
 	async list(c, params, userId) {
+		await emailDeliveryService.ensure(c);
 
 		let { emailId, type, accountId, size, timeSort, allReceive } = params;
 
@@ -54,9 +57,23 @@ const emailService = {
 			allReceive = accountRow.allReceive;
 		}
 
+		// Capture the cursor before the list so concurrent deliveries can still be polled.
+		let latestEmail = await orm(c).select({ ...email, deliveryId: emailDelivery.deliveryId }).from(email)
+			.leftJoin(account, eq(account.accountId, email.accountId))
+			.leftJoin(emailDelivery, eq(emailDelivery.emailId, email.emailId)).where(
+				and(
+					allReceive ? eq(1,1) : eq(email.accountId, accountId),
+					eq(email.userId, userId),
+					eq(email.type, type),
+					eq(email.isDel, isDel.NORMAL),
+					eq(account.isDel, isDel.NORMAL)
+				))
+			.orderBy(desc(Number(type) === emailConst.type.RECEIVE ? emailDelivery.deliveryId : email.emailId)).limit(1).get();
+
 		const query = orm(c)
 			.select({
 				...email,
+				deliveryId: emailDelivery.deliveryId,
 				starId: star.starId
 			})
 			.from(email)
@@ -69,6 +86,9 @@ const emailService = {
 			).leftJoin(
 				account,
 				eq(account.accountId, email.accountId)
+			).leftJoin(
+				emailDelivery,
+				eq(emailDelivery.emailId, email.emailId)
 			)
 			.where(
 				and(
@@ -104,16 +124,7 @@ const emailService = {
 				)
 		).get();
 
-		const latestEmailQuery = orm(c).select().from(email).where(
-			and(
-				allReceive ? eq(1,1) : eq(email.accountId, accountId),
-				eq(email.userId, userId),
-				eq(email.type, type),
-				eq(email.isDel, isDel.NORMAL)
-			))
-			.orderBy(desc(email.emailId)).limit(1).get();
-
-		let [list, totalRow, latestEmail] = await Promise.all([listQuery, totalQuery, latestEmailQuery]);
+		let [list, totalRow] = await Promise.all([listQuery, totalQuery]);
 
 		list = list.map(item => ({
 			...item,
@@ -126,6 +137,7 @@ const emailService = {
 		if (!latestEmail) {
 			latestEmail = {
 				emailId: 0,
+				deliveryId: 0,
 				accountId: accountId,
 				userId: userId,
 			}
@@ -546,7 +558,9 @@ const emailService = {
 		const { noRecipient  } = await settingService.query(c);
 
 		//查询所有收件人账号信息
-		let accountList = await orm(c).select().from(account).where(inArray(account.email, receiveEmail)).all();
+		let accountList = await orm(c).select().from(account).where(
+			or(...receiveEmail.map(address => sql`${account.email} COLLATE NOCASE = ${address}`))
+		).all();
 
 		//查询所有收件人权限身份
 		const userIds = accountList.map(accountRow => accountRow.userId);
@@ -565,7 +579,7 @@ const emailService = {
 			emailValues.toName = emailUtils.getName(email);
 			emailValues.emailId = null;
 
-			const accountRow = accountList.find(accountRow => accountRow.email === email);
+			const accountRow = accountList.find(accountRow => accountRow.email.toLowerCase() === email.toLowerCase());
 
 			//如果收件人存在就把邮件信息改成收件人的
 			if (accountRow) {
@@ -619,6 +633,9 @@ const emailService = {
 		const receiveEmailList = emailDataList.filter(emailRow => emailRow.status === emailConst.status.RECEIVE || emailRow.status === emailConst.status.NOONE);
 
 		for (const emailData of receiveEmailList) {
+			emailData.isDel = isDel.DELETE;
+			const status = emailData.status;
+			emailData.status = emailConst.status.SAVING;
 
 			const emailRow = await orm(c).insert(email).values(emailData).returning().get();
 
@@ -631,6 +648,7 @@ const emailService = {
 				attValues.attId = null;
 				await orm(c).insert(att).values(attValues).run();
 			}
+			await this.completeReceive(c, status, emailRow.emailId);
 
 		}
 
@@ -701,29 +719,32 @@ const emailService = {
 	},
 
 	async latest(c, params, userId) {
-		let { emailId, accountId, allReceive } = params;
+		await emailDeliveryService.ensure(c);
+		let { emailId, deliveryId, accountId, allReceive } = params;
 		allReceive = Number(allReceive);
+		const hasDeliveryCursor = deliveryId !== undefined && Number.isSafeInteger(Number(deliveryId)) && Number(deliveryId) >= 0;
 
 		if (isNaN(allReceive)) {
 			let accountRow = await accountService.selectById(c, accountId);
 			allReceive = accountRow.allReceive;
 		}
 
-		let list = await orm(c).select({...email}).from(email)
+		let list = await orm(c).select({...email, deliveryId: emailDelivery.deliveryId}).from(email)
+			.leftJoin(emailDelivery, eq(emailDelivery.emailId, email.emailId))
 			.leftJoin(
 				account,
 				eq(account.accountId, email.accountId)
 			)
 			.where(
 				and(
-					gt(email.emailId, emailId),
+					hasDeliveryCursor ? gt(emailDelivery.deliveryId, Number(deliveryId)) : gt(email.emailId, emailId),
 					eq(email.userId, userId),
 					eq(email.isDel, isDel.NORMAL),
 					eq(account.isDel, isDel.NORMAL),
 					allReceive ? eq(1,1) : eq(email.accountId, accountId),
 					eq(email.type, emailConst.type.RECEIVE)
 				))
-			.orderBy(desc(email.emailId))
+			.orderBy(asc(hasDeliveryCursor ? emailDelivery.deliveryId : email.emailId))
 			.limit(20);
 
 		await this.emailAddAtt(c, list);
@@ -921,15 +942,15 @@ const emailService = {
 	},
 
 	async completeReceive(c, status, emailId) {
-		return await orm(c).update(email).set({
-			isDel: isDel.NORMAL,
-			status: status
-		}).where(eq(email.emailId, emailId)).returning().get();
+		await emailDeliveryService.complete(c, emailId, status);
+		return this.selectById(c, emailId);
 	},
 
 	async completeReceiveAll(c) {
-		await c.env.db.prepare(`UPDATE email as e SET status = ${emailConst.status.RECEIVE} WHERE status = ${emailConst.status.SAVING} AND EXISTS (SELECT 1 FROM account WHERE account_id = e.account_id)`).run();
-		await c.env.db.prepare(`UPDATE email as e SET status = ${emailConst.status.NOONE} WHERE status = ${emailConst.status.SAVING} AND NOT EXISTS (SELECT 1 FROM account WHERE account_id = e.account_id)`).run();
+		await emailDeliveryService.ensure(c);
+		await c.env.db.prepare(`UPDATE email AS e SET is_del = 0,
+			status = CASE WHEN EXISTS (SELECT 1 FROM account WHERE account_id = e.account_id) THEN ${emailConst.status.RECEIVE} ELSE ${emailConst.status.NOONE} END
+			WHERE status = ${emailConst.status.SAVING} AND EXISTS (SELECT 1 FROM email_delivery WHERE email_id = e.email_id)`).run();
 	},
 
 	async batchDelete(c, params) {

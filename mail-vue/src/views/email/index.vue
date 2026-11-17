@@ -86,6 +86,7 @@ async function latest() {
     }
 
     const latestId = scroll.value.latestEmail?.emailId
+    const deliveryId = scroll.value.latestEmail?.deliveryId
 
     if (!scroll.value.firstLoad && autoRefresh > 1) {
       try {
@@ -96,7 +97,7 @@ async function latest() {
 
         //确保发起请求时最后一个邮件是当前账号的,或者
         if (accountId === scroll.value.latestEmail?.reqAccountId) {
-          list = await emailLatest(latestId, accountId, allReceive);
+          list = await emailLatest(latestId, accountId, allReceive, deliveryId);
         }
 
         //确保请求回来后，账号没有切换，时间排序没有改变，全部邮件类型没变
